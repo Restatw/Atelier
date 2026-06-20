@@ -1,0 +1,23 @@
+name: Deploy to nginx (self-hosted)
+
+on:
+  workflow_dispatch:   # manual trigger only — nginx deploy touches local files
+
+jobs:
+  deploy:
+    runs-on: self-hosted   # must be registered on DESKTOP-NTIM3QG
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 8
+
+      - name: Write .env.deploy from secrets
+        run: |
+          cat > .env.deploy <<EOF
+          SITE_DOMAIN=${{ secrets.SITE_DOMAIN }}
+          CF_ZONE_ID=${{ secrets.CF_ZONE_ID }}
+          CF_API_TOKEN=${{ secrets.CF_API_TOKEN }}
+          EOF
+
+      - name: Deploy
+        run: bash deploy.sh

@@ -1,0 +1,33 @@
+name: Deploy to IPFS (Pinata + Cloudflare Worker)
+
+on:
+  workflow_dispatch:   # manual only — replaced by deploy-pages.yml
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 8   # needed so vite.config.js can run git log for changelog
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Write .env.deploy from secrets
+        run: |
+          cat > .env.deploy <<EOF
+          SITE_DOMAIN=${{ secrets.SITE_DOMAIN }}
+          PINATA_JWT=${{ secrets.PINATA_JWT }}
+          CF_ACCOUNT_ID=${{ secrets.CF_ACCOUNT_ID }}
+          CF_ZONE_ID=${{ secrets.CF_ZONE_ID }}
+          CF_API_TOKEN=${{ secrets.CF_API_TOKEN }}
+          EOF
+
+      - name: Deploy
+        run: bash deploy-ipfs.sh

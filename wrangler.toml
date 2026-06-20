@@ -1,0 +1,10 @@
+name = "atelier"
+main = "cloudflare-worker/worker.js"
+compatibility_date = "2024-11-01"
+
+routes = [
+  { pattern = "atelier.re95.org/*", zone_name = "re95.org" }
+]
+
+[assets]
+directory = "./dist"
