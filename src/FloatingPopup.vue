@@ -139,6 +139,7 @@ defineExpose({ initPos, reset, pos, minimized })
 .flp-float {
   user-select: none;
   cursor: grab;
+  touch-action: manipulation;
 }
 .flp-float:active { cursor: grabbing; }
 .flp-float-body {
@@ -180,6 +181,7 @@ defineExpose({ initPos, reset, pos, minimized })
   padding: 0 10px 10px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.7);
   user-select: none;
+  touch-action: manipulation;
 }
 .flp-header {
   display: flex;
