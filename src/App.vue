@@ -188,13 +188,15 @@
                   @input="composite()"
                   @change="saveHistory()"
                 />
-                <input type="number" class="op-val-input" min="0" max="100"
-                  :value="layer.opacity"
-                  @change="layer.opacity = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = layer.opacity; composite(); saveHistory()"
-                  @keydown.enter.stop="$event.target.blur()"
-                  @focus.stop="$event.target.select()"
-                  @mousedown.stop @touchstart.stop
-                /><span class="op-unit">%</span>
+                <div class="op-val-wrap">
+                  <input type="number" class="op-val-input" min="0" max="100"
+                    :value="layer.opacity"
+                    @change="layer.opacity = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = layer.opacity; composite(); saveHistory()"
+                    @keydown.enter.stop="$event.target.blur()"
+                    @focus.stop="$event.target.select()"
+                    @mousedown.stop @touchstart.stop
+                  /><span class="op-unit">%</span>
+                </div>
               </div>
             </div>
           </div>
@@ -383,22 +385,26 @@
           <div class="bp-row">
             <span class="bp-label">{{ t('brushSize') }}</span>
             <input type="range" min="1" max="60" v-model.number="lineWidth" class="bp-slider" @mousedown.stop @touchstart.stop />
-            <input type="number" class="bp-val-input" min="1" max="60"
-              :value="lineWidth"
-              @change="lineWidth = Math.max(1, Math.min(60, parseInt($event.target.value) || 1)); $event.target.value = lineWidth"
-              @keydown.enter.stop="$event.target.blur()"
-              @focus.stop="$event.target.select()"
-              @mousedown.stop @touchstart.stop />
+            <div class="bp-val-wrap">
+              <input type="number" class="bp-val-input" min="1" max="60"
+                :value="lineWidth"
+                @change="lineWidth = Math.max(1, Math.min(60, parseInt($event.target.value) || 1)); $event.target.value = lineWidth"
+                @keydown.enter.stop="$event.target.blur()"
+                @focus.stop="$event.target.select()"
+                @mousedown.stop @touchstart.stop />
+            </div>
           </div>
           <div class="bp-row">
             <span class="bp-label">{{ t('opacity') }}</span>
             <input type="range" min="0" max="100" v-model.number="strokeOpacity" class="bp-slider" @mousedown.stop @touchstart.stop />
-            <input type="number" class="bp-val-input" min="0" max="100"
-              :value="strokeOpacity"
-              @change="strokeOpacity = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = strokeOpacity"
-              @keydown.enter.stop="$event.target.blur()"
-              @focus.stop="$event.target.select()"
-              @mousedown.stop @touchstart.stop /><span class="bp-unit">%</span>
+            <div class="bp-val-wrap">
+              <input type="number" class="bp-val-input" min="0" max="100"
+                :value="strokeOpacity"
+                @change="strokeOpacity = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = strokeOpacity"
+                @keydown.enter.stop="$event.target.blur()"
+                @focus.stop="$event.target.select()"
+                @mousedown.stop @touchstart.stop /><span class="bp-unit">%</span>
+            </div>
           </div>
         </div>
       </FloatingPopup>
@@ -418,12 +424,14 @@
           <div class="bp-row">
             <span class="bp-label">{{ t('wandTolerance') }}</span>
             <input type="range" min="0" max="128" v-model.number="wandTolerance" class="bp-slider" @mousedown.stop @touchstart.stop />
-            <input type="number" class="bp-val-input" min="0" max="128"
-              :value="wandTolerance"
-              @change="wandTolerance = Math.max(0, Math.min(128, parseInt($event.target.value) || 0)); $event.target.value = wandTolerance"
-              @keydown.enter.stop="$event.target.blur()"
-              @focus.stop="$event.target.select()"
-              @mousedown.stop @touchstart.stop />
+            <div class="bp-val-wrap">
+              <input type="number" class="bp-val-input" min="0" max="128"
+                :value="wandTolerance"
+                @change="wandTolerance = Math.max(0, Math.min(128, parseInt($event.target.value) || 0)); $event.target.value = wandTolerance"
+                @keydown.enter.stop="$event.target.blur()"
+                @focus.stop="$event.target.select()"
+                @mousedown.stop @touchstart.stop />
+            </div>
           </div>
         </div>
       </FloatingPopup>
@@ -443,22 +451,26 @@
           <div class="bp-row">
             <span class="bp-label">{{ t('fontSize') }}</span>
             <input type="range" min="8" max="300" v-model.number="fontSize" class="bp-slider" @mousedown.stop @touchstart.stop />
-            <input type="number" class="bp-val-input" min="8" max="300"
-              :value="fontSize"
-              @change="fontSize = Math.max(8, Math.min(300, parseInt($event.target.value) || 8)); $event.target.value = fontSize"
-              @keydown.enter.stop="$event.target.blur()"
-              @focus.stop="$event.target.select()"
-              @mousedown.stop @touchstart.stop />
+            <div class="bp-val-wrap">
+              <input type="number" class="bp-val-input" min="8" max="300"
+                :value="fontSize"
+                @change="fontSize = Math.max(8, Math.min(300, parseInt($event.target.value) || 8)); $event.target.value = fontSize"
+                @keydown.enter.stop="$event.target.blur()"
+                @focus.stop="$event.target.select()"
+                @mousedown.stop @touchstart.stop />
+            </div>
           </div>
           <div class="bp-row">
             <span class="bp-label">{{ t('opacity') }}</span>
             <input type="range" min="0" max="100" v-model.number="strokeOpacity" class="bp-slider" @mousedown.stop @touchstart.stop />
-            <input type="number" class="bp-val-input" min="0" max="100"
-              :value="strokeOpacity"
-              @change="strokeOpacity = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = strokeOpacity"
-              @keydown.enter.stop="$event.target.blur()"
-              @focus.stop="$event.target.select()"
-              @mousedown.stop @touchstart.stop /><span class="bp-unit">%</span>
+            <div class="bp-val-wrap">
+              <input type="number" class="bp-val-input" min="0" max="100"
+                :value="strokeOpacity"
+                @change="strokeOpacity = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = strokeOpacity"
+                @keydown.enter.stop="$event.target.blur()"
+                @focus.stop="$event.target.select()"
+                @mousedown.stop @touchstart.stop /><span class="bp-unit">%</span>
+            </div>
           </div>
           <div class="bp-row">
             <span class="bp-label">{{ t('fontFamily') }}</span>
@@ -591,12 +603,14 @@
           <div v-if="exportFormat === 'jpg' || exportFormat === 'webp'" class="ep-quality">
             <span class="ep-label">{{ t('exportQuality') }}</span>
             <input type="range" min="1" max="100" v-model.number="exportQuality" class="ep-slider" />
-            <input type="number" class="bp-val-input" min="1" max="100"
-              :value="exportQuality"
-              @change="exportQuality = Math.max(1, Math.min(100, parseInt($event.target.value) || 1)); $event.target.value = exportQuality"
-              @keydown.enter.stop="$event.target.blur()"
-              @focus.stop="$event.target.select()"
-              @mousedown.stop @touchstart.stop /><span class="bp-unit">%</span>
+            <div class="bp-val-wrap">
+              <input type="number" class="bp-val-input" min="1" max="100"
+                :value="exportQuality"
+                @change="exportQuality = Math.max(1, Math.min(100, parseInt($event.target.value) || 1)); $event.target.value = exportQuality"
+                @keydown.enter.stop="$event.target.blur()"
+                @focus.stop="$event.target.select()"
+                @mousedown.stop @touchstart.stop /><span class="bp-unit">%</span>
+            </div>
           </div>
           <button class="ep-btn" @click="doExportImage">{{ t('export') }}</button>
         </div>
@@ -3172,18 +3186,26 @@ onUnmounted(() => {
   accent-color: #6060cc;
   cursor: pointer;
 }
+.op-val-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 32px;
+  flex-shrink: 0;
+}
 .op-val-input {
   font-size: 10px;
   color: #666666;
-  width: 20px;
+  width: 0;
+  flex: 1;
   text-align: right;
-  flex-shrink: 0;
   background: transparent;
   border: none;
   border-bottom: 1px solid transparent;
   padding: 0;
   cursor: text;
   -moz-appearance: textfield;
+  min-width: 0;
 }
 .op-val-input:hover { border-bottom-color: #333; }
 .op-val-input:focus { border-bottom-color: #6060cc; color: #aaa; outline: none; }
@@ -3618,18 +3640,26 @@ button:focus-visible {
   border: 2px solid #1a1a1a;
   box-shadow: 0 1px 4px rgba(0,0,0,0.5);
 }
+.bp-val-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 38px;
+  flex-shrink: 0;
+}
 .bp-val-input {
   font-size: 11px;
   color: #aaaaaa;
-  width: 26px;
+  width: 0;
+  flex: 1;
   text-align: right;
-  flex-shrink: 0;
   background: transparent;
   border: none;
   border-bottom: 1px solid transparent;
   padding: 0;
   cursor: text;
   -moz-appearance: textfield;
+  min-width: 0;
 }
 .bp-val-input:hover { border-bottom-color: #3a3a3a; }
 .bp-val-input:focus { border-bottom-color: #6060cc; color: #fff; outline: none; }
