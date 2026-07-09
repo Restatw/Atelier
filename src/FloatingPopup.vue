@@ -25,9 +25,11 @@ function initPos(x, y) {
 }
 function reset() { _positioned = false }
 
-watch(() => props.open && !minimized.value, async visible => {
-  if (!visible) return
-  await nextTick()
+// Re-clamps the popup back into the viewport. Called on open, and again
+// whenever its rendered size changes (e.g. switching to a taller tab) —
+// content height isn't static for every popup, so this can't be a one-shot
+// check done only at open time.
+function clampIntoView() {
   if (!popupEl.value) return
   const pw = props.width ?? popupEl.value.offsetWidth
   const ph = popupEl.value.offsetHeight
@@ -35,7 +37,24 @@ watch(() => props.open && !minimized.value, async visible => {
     pos.y = Math.max(6, window.innerHeight - ph - 6)
   if (pos.x + pw > window.innerWidth - 6)
     pos.x = Math.max(6, window.innerWidth - pw - 6)
+}
+
+watch(() => props.open && !minimized.value, async visible => {
+  if (!visible) return
+  await nextTick()
+  clampIntoView()
 })
+
+let _resizeObserver = null
+watch(popupEl, (el, oldEl) => {
+  if (oldEl && _resizeObserver) _resizeObserver.disconnect()
+  if (!el) return
+  _resizeObserver = new ResizeObserver(() => {
+    if (props.open && !minimized.value) clampIntoView()
+  })
+  _resizeObserver.observe(el)
+})
+onUnmounted(() => _resizeObserver?.disconnect())
 
 function _addListeners() {
   window.addEventListener('mousemove', _onMove)
