@@ -580,17 +580,6 @@
             <button class="fp-btn" @click="triggerProjectImport">{{ t('loadProject') }}</button>
             <button class="fp-btn" @click="onSaveProject">{{ t('saveProject') }}</button>
           </div>
-          <div class="fp-section">{{ t('ipfsOpenFromCid') }}</div>
-          <input type="text" v-model="fileOpenCid" class="bk-input"
-            :placeholder="t('ipfsCidPlaceholder')"
-            @mousedown.stop @touchstart.stop
-            @keydown.enter="openProjectFromCid" />
-          <button class="fp-full-btn" @click="openProjectFromCid"
-            :disabled="!fileOpenCid || ipfsStatus === 'restoring'">
-            {{ ipfsStatus === 'restoring' ? t('ipfsRestoring') : t('ipfsOpenFromCid') }}
-          </button>
-          <div v-if="ipfsStatus === 'error'" class="bk-error">{{ ipfsStatusMsg }}</div>
-          <div class="fp-divider" />
           <div class="fp-section">{{ t('imageSection') }}</div>
           <button class="fp-full-btn" @click="triggerImport">{{ t('importImage') }}</button>
           <div class="fp-section fp-section-sm">{{ t('exportImage') }}</div>
@@ -662,6 +651,19 @@
 
           <!-- ── IPFS tab ─────────────────────────────────────── -->
           <template v-else>
+
+          <!-- Open from CID -->
+          <div class="bk-section">{{ t('ipfsOpenFromCid') }}</div>
+          <input type="text" v-model="ipfsRestoreCid" class="bk-input"
+            :placeholder="t('ipfsCidPlaceholder')"
+            @mousedown.stop @touchstart.stop
+            @keydown.enter="restoreFromCid" />
+          <button class="fp-full-btn" @click="restoreFromCid"
+            :disabled="!ipfsRestoreCid || ipfsStatus === 'restoring'">
+            {{ ipfsStatus === 'restoring' ? t('ipfsRestoring') : t('ipfsOpenFromCid') }}
+          </button>
+          <div v-if="ipfsStatus === 'error'" class="bk-error">{{ ipfsStatusMsg }}</div>
+          <div class="bk-divider" />
 
           <!-- Mode -->
           <div class="bk-section">{{ t('ipfsMode') }}</div>
@@ -970,7 +972,6 @@ watch(canvasBg, v => { paintStore.canvasBg = v })
 // ── Export state ──────────────────────────────────────────
 const exportFormat  = ref('png')
 const exportQuality = ref(90)
-const fileOpenCid   = ref('')
 
 // ── Popup open states (declared early for useColorWheel) ──
 const colorPopupOpen    = ref(false)
@@ -2252,17 +2253,6 @@ function newProject() {
   if (!confirm(t('newProjectConfirm'))) return
   closeAllPopups()
   resetToBlank()
-}
-
-async function openProjectFromCid() {
-  const cid = fileOpenCid.value.trim()
-  if (!cid) return
-  ipfsRestoreCid.value = cid
-  await restoreFromCid()
-  if (ipfsStatus.value === 'done') {
-    fileOpenCid.value   = ''
-    filePopupOpen.value = false
-  }
 }
 
 // ── Draw state ────────────────────────────────────────────
