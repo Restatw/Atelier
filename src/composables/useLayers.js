@@ -102,7 +102,11 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
       prev.visible !== l.visible || prev.opacity !== l.opacity
   }
 
-  async function persistToStorage() {
+  // Saves current layer state to local IndexedDB/paintStore only — no
+  // network involvement, no _lastSynced bookkeeping. Safe to call from any
+  // context (local edit or after merging a remote update) without side
+  // effects on what's considered "already pushed".
+  async function persistLocalOnly() {
     const meta    = layers.value.map(l => ({ id: l.id, name: l.name, visible: l.visible, opacity: l.opacity }))
     const oldIds  = paintStore.layersMeta.map(m => `layer-${m.id}`)
     const newIds  = new Set(meta.map(m => `layer-${m.id}`))
@@ -117,33 +121,52 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     await dbDelMany(toDelete)
     const dataURLs = await Promise.all(layers.value.map(l => Promise.resolve(l.canvas.toDataURL())))
     await Promise.all(layers.value.map((l, i) => dbPut(`layer-${l.id}`, dataURLs[i])))
+    return dataURLs
+  }
 
-    if (isSyncActive && !_applyingRemote) {
-      const currentIds = new Set(layers.value.map(l => l.id))
-      const removedLayerIds = Array.from(_lastSynced.keys()).filter(id => !currentIds.has(id))
-      const changed = layers.value
-        .map((l, i) => ({ l, dataURL: dataURLs[i] }))
-        .filter(({ l, dataURL }) => _layerDiffers(l, dataURL))
-        .map(({ l, dataURL }) => ({
-          id: l.id, name: l.name, visible: l.visible, opacity: l.opacity,
-          dataURL, rev: Date.now(),
-        }))
-
-      if (changed.length || removedLayerIds.length) {
-        pushCanvasUpdate({
-          canvasW: canvasLogicalW.value,
-          canvasH: canvasLogicalH.value,
-          layerOrder: layers.value.map(l => l.id),
-          layers: changed,
-          removedLayerIds,
-        })
-      }
-
-      _lastSynced.clear()
-      layers.value.forEach((l, i) => _lastSynced.set(l.id, {
-        name: l.name, visible: l.visible, opacity: l.opacity, dataURL: dataURLs[i],
+  // Diffs current layer state against _lastSynced and pushes only what
+  // changed since the last push, then stamps _lastSynced to match.
+  //
+  // Must only run for a genuinely local edit. If this ran as a side effect
+  // of applyRemoteLayers(), _lastSynced would get stamped for EVERY layer
+  // currently in layers.value — including one the local user just finished
+  // drawing on but whose own debounced persistToStorage() hasn't fired yet.
+  // That layer would then look "already synced" and its real push would be
+  // silently dropped when its timer finally runs, i.e. the local user's own
+  // completed stroke never reaches the server and appears to get reverted
+  // once a peer's unrelated update comes in. Keep this split from
+  // applyRemoteLayers, which calls persistLocalOnly() directly instead.
+  function pushChangesToSync(dataURLs) {
+    if (!isSyncActive || _applyingRemote) return
+    const currentIds = new Set(layers.value.map(l => l.id))
+    const removedLayerIds = Array.from(_lastSynced.keys()).filter(id => !currentIds.has(id))
+    const changed = layers.value
+      .map((l, i) => ({ l, dataURL: dataURLs[i] }))
+      .filter(({ l, dataURL }) => _layerDiffers(l, dataURL))
+      .map(({ l, dataURL }) => ({
+        id: l.id, name: l.name, visible: l.visible, opacity: l.opacity,
+        dataURL, rev: Date.now(),
       }))
+
+    if (changed.length || removedLayerIds.length) {
+      pushCanvasUpdate({
+        canvasW: canvasLogicalW.value,
+        canvasH: canvasLogicalH.value,
+        layerOrder: layers.value.map(l => l.id),
+        layers: changed,
+        removedLayerIds,
+      })
     }
+
+    for (const id of removedLayerIds) _lastSynced.delete(id)
+    layers.value.forEach((l, i) => _lastSynced.set(l.id, {
+      name: l.name, visible: l.visible, opacity: l.opacity, dataURL: dataURLs[i],
+    }))
+  }
+
+  async function persistToStorage() {
+    const dataURLs = await persistLocalOnly()
+    pushChangesToSync(dataURLs)
   }
 
   // Merges a partial layer update received from a peer via the sync
@@ -231,7 +254,21 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
         activeLayerId.value = ordered.at(-1)?.id ?? null
 
       composite()
-      await persistToStorage()
+      await persistLocalOnly()
+
+      // Only the layers we just received are now known-synced. Anything
+      // else in local state (e.g. a stroke the local user just finished
+      // but whose own debounced persistToStorage() hasn't run yet) must be
+      // left untouched here — see pushChangesToSync() above for why.
+      for (const incoming of payload.layers || []) {
+        const l = layers.value.find(x => x.id === incoming.id)
+        if (l) {
+          _lastSynced.set(incoming.id, {
+            name: l.name, visible: l.visible, opacity: l.opacity, dataURL: incoming.dataURL,
+          })
+        }
+      }
+      for (const id of payload.removedLayerIds || []) _lastSynced.delete(id)
     } finally {
       _applyingRemote = false
     }

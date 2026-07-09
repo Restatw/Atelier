@@ -2632,11 +2632,14 @@ function queueOrApplyRemoteUpdate(payload) {
   else lc.applyRemoteLayers(payload)
 }
 
-function flushPendingRemoteUpdates() {
+async function flushPendingRemoteUpdates() {
   if (!_pendingRemoteUpdates.length) return
   const queue = _pendingRemoteUpdates
   _pendingRemoteUpdates = []
-  queue.forEach(p => lc.applyRemoteLayers(p))
+  // Sequential, not parallel: overlapping calls would race on the shared
+  // _applyingRemote flag (one call's `finally` resetting it while another
+  // is still mid-merge) and on layers.value itself.
+  for (const p of queue) await lc.applyRemoteLayers(p)
 }
 
 function onPointerUp() {
