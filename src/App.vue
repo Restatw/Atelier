@@ -1268,8 +1268,8 @@ function toggleSettingsPopup() {
     bringSpToFront()
     const r = settingsTriggerRef.value.getBoundingClientRect()
     const x = toolbarSide.value === 'left'
-      ? r.right + 6
-      : Math.max(6, r.left - 196 - 6)
+      ? Math.min(r.right + 6, window.innerWidth - 220 - 6)
+      : Math.max(6, r.left - 220 - 6)
     spRef.value?.initPos(x, Math.max(6, r.top))
     settingsPopupOpen.value = true
   }
