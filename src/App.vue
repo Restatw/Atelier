@@ -689,6 +689,15 @@
               @click="copyText(shareUrl, 'url')">
               {{ copiedKey === 'url' ? t('ipfsCopied') : t('ipfsCopyUrl') }}
             </button>
+            <button v-if="isWidget" class="bk-sm-btn bk-full"
+              :class="{ 'bk-copied': shareToRoomStatus === 'sent' }"
+              :disabled="shareToRoomStatus === 'sending'"
+              @click="shareToRoom">
+              {{ shareToRoomStatus === 'sending' ? t('ipfsSharing')
+                 : shareToRoomStatus === 'sent'    ? t('ipfsShared')
+                 : shareToRoomStatus === 'error'   ? t('ipfsShareError')
+                 : t('ipfsShareToRoom') }}
+            </button>
           </template>
 
         </div>
@@ -821,6 +830,8 @@ import {
   Type, Bold, Italic
 } from 'lucide-vue-next'
 import { useIpfsBackup } from './composables/useIpfsBackup.js'
+import { isWidget } from './widgetContext.js'
+import { sendRoomMessage } from './widgetApi.js'
 
 // ── Store ─────────────────────────────────────────────────
 const paintStore = usePaintStore()
@@ -1007,6 +1018,17 @@ const shareUrl = computed(() => {
   if (ipfsLastThumbCid.value) base += `&thumb=${ipfsLastThumbCid.value}`
   return base
 })
+
+// ── Share to room (widget mode only) ─────────────────────
+const shareToRoomStatus = ref('idle') // 'idle' | 'sending' | 'sent' | 'error'
+
+async function shareToRoom() {
+  if (!shareUrl.value) return
+  shareToRoomStatus.value = 'sending'
+  const ok = await sendRoomMessage(`${t('ipfsSharedFromAtelier')}: ${shareUrl.value}`)
+  shareToRoomStatus.value = ok ? 'sent' : 'error'
+  if (ok) setTimeout(() => { shareToRoomStatus.value = 'idle' }, 2000)
+}
 
 const copiedKey       = ref('')
 const startupErrorMsg = ref('')

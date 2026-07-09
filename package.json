@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "lucide-vue-next": "^1.0.0",
+    "matrix-widget-api": "^1.13.1",
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
     "vue": "^3.4.0"

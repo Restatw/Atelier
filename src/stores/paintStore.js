@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { roomNamespace } from '../widgetContext.js'
 
 export const usePaintStore = defineStore('paint', {
   state: () => ({
@@ -18,5 +19,9 @@ export const usePaintStore = defineStore('paint', {
     ipfsNodeUrl: 'http://localhost:5001',
     ipfsGateway: 'https://ipfs.io',
   }),
-  persist: true,
+  // Standalone use keeps the plain 'paint' key (backward compatible with
+  // existing data); widget use gets a per-room key so rooms don't share state.
+  persist: {
+    key: roomNamespace ? `paint-${roomNamespace}` : 'paint',
+  },
 })
