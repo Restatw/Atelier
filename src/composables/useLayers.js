@@ -177,7 +177,20 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
           if (incoming.dataURL) {
             await new Promise(resolve => {
               const img = new Image()
-              img.onload  = () => { existing.canvas.getContext('2d').clearRect(0, 0, w, h); existing.canvas.getContext('2d').drawImage(img, 0, 0); resolve() }
+              img.onload  = () => {
+                // A local drawing tool (soft brush, eraser, ...) may have left
+                // this context's globalAlpha/compositeOperation in a non-default
+                // state. Reset both before drawing so the incoming layer content
+                // replaces the canvas at full, normal-blend opacity — otherwise
+                // a sync arriving mid-stroke fades the whole layer, not just
+                // whatever's new.
+                const ctx = existing.canvas.getContext('2d')
+                ctx.globalAlpha = 1
+                ctx.globalCompositeOperation = 'source-over'
+                ctx.clearRect(0, 0, w, h)
+                ctx.drawImage(img, 0, 0)
+                resolve()
+              }
               img.onerror = resolve
               img.src = incoming.dataURL
             })
@@ -187,7 +200,13 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
           if (incoming.dataURL) {
             await new Promise(resolve => {
               const img = new Image()
-              img.onload  = () => { canvas.getContext('2d').drawImage(img, 0, 0); resolve() }
+              img.onload  = () => {
+                const ctx = canvas.getContext('2d')
+                ctx.globalAlpha = 1
+                ctx.globalCompositeOperation = 'source-over'
+                ctx.drawImage(img, 0, 0)
+                resolve()
+              }
               img.onerror = resolve
               img.src = incoming.dataURL
             })
