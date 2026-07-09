@@ -2619,7 +2619,32 @@ function onPointerMove(e) {
   }
 }
 
+// A remote sync update can arrive (async image decode) at any point,
+// including mid-stroke. Drawing tools write directly onto the active
+// layer's canvas via a live-held context (getActiveCtx()), so swapping
+// that canvas's content out from under an in-progress stroke corrupts it
+// (broken paths, opacity artifacts). Queue remote updates while drawing
+// and apply them once the current stroke finishes instead.
+let _pendingRemoteUpdates = []
+
+function queueOrApplyRemoteUpdate(payload) {
+  if (drawing) _pendingRemoteUpdates.push(payload)
+  else lc.applyRemoteLayers(payload)
+}
+
+function flushPendingRemoteUpdates() {
+  if (!_pendingRemoteUpdates.length) return
+  const queue = _pendingRemoteUpdates
+  _pendingRemoteUpdates = []
+  queue.forEach(p => lc.applyRemoteLayers(p))
+}
+
 function onPointerUp() {
+  _onPointerUpInner()
+  if (!drawing) flushPendingRemoteUpdates()
+}
+
+function _onPointerUpInner() {
   if (viewDrag) { viewDrag = null; return }
 
   // ── Transform handle up ──
@@ -2692,7 +2717,7 @@ onMounted(async () => {
   vw.resizeCanvas(wrapperRef.value)
   await lc.init()
 
-  initCollabSync({ onRemoteUpdate: lc.applyRemoteLayers })
+  initCollabSync({ onRemoteUpdate: queueOrApplyRemoteUpdate })
 
   changelogOpen.value = true
 
