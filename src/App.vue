@@ -276,7 +276,7 @@
       <!-- Backup + Settings — pinned to bottom -->
       <div class="tb-bottom">
         <div class="tb-sep" />
-        <button ref="backupTriggerRef" class="tool-btn" :class="{ active: backupPopupOpen }" @click.stop="toggleBackupPopup" :title="t('ipfsBackup')"><CloudUpload :size="16" /></button>
+        <button ref="backupTriggerRef" class="tool-btn" :class="{ active: backupPopupOpen }" @click.stop="toggleBackupPopup" :title="t('cloudPanel')"><CloudUpload :size="16" /></button>
         <button ref="settingsTriggerRef" class="tool-btn" :class="{ active: settingsPopupOpen }" @click.stop="toggleSettingsPopup" :title="t('settings')"><Settings :size="16" /></button>
       </div>
     </aside>
@@ -621,7 +621,7 @@
         ref="bkRef"
         :open="backupPopupOpen"
         @update:open="backupPopupOpen = $event"
-        :title="t('ipfsBackup')"
+        :title="t('cloudPanel')"
         :zIndex="bkZ"
         @bring-to-front="bringBkToFront"
         :width="260"
@@ -629,24 +629,39 @@
         <template #icon><CloudUpload :size="16" /></template>
         <div style="display:flex;flex-direction:column;gap:8px">
 
-          <!-- Live collaboration -->
-          <template v-if="isSyncActive">
-            <div class="bk-section">{{ t('collabLive') }}</div>
-            <div class="bk-cid">{{ t('collabPeoplePrefix') }} {{ presenceCount }}</div>
-            <template v-if="isCollabSession">
-              <div class="bk-label">{{ t('collabShareUrl') }}</div>
-              <div class="bk-cid">{{ collabUrl }}</div>
-              <button class="bk-sm-btn bk-full" :class="{ 'bk-copied': copiedKey === 'collab' }"
-                @click="copyText(collabUrl, 'collab')">
-                {{ copiedKey === 'collab' ? t('ipfsCopied') : t('ipfsCopyUrl') }}
-              </button>
+          <!-- Tab switcher -->
+          <div class="sp-lang-btns">
+            <button :class="{ active: backupPopupTab === 'sync' }"
+              @click="backupPopupTab = 'sync'">{{ t('tabSync') }}</button>
+            <button :class="{ active: backupPopupTab === 'ipfs' }"
+              @click="backupPopupTab = 'ipfs'">{{ t('tabIpfs') }}</button>
+          </div>
+
+          <!-- ── Sync tab ─────────────────────────────────────── -->
+          <template v-if="backupPopupTab === 'sync'">
+            <template v-if="isSyncActive">
+              <div class="bk-section">{{ t('collabLive') }}</div>
+              <div class="bk-cid">{{ t('collabPeoplePrefix') }} {{ presenceCount }}</div>
+              <template v-if="isCollabSession">
+                <div class="bk-label">{{ t('collabShareUrl') }}</div>
+                <div class="bk-cid">{{ collabUrl }}</div>
+                <button class="bk-sm-btn bk-full" :class="{ 'bk-copied': copiedKey === 'collab' }"
+                  @click="copyText(collabUrl, 'collab')">
+                  {{ copiedKey === 'collab' ? t('ipfsCopied') : t('ipfsCopyUrl') }}
+                </button>
+              </template>
             </template>
-            <div class="bk-divider" />
+            <template v-else-if="!isWidget">
+              <div class="bk-cid">{{ t('collabStartHint') }}</div>
+              <button class="bk-sm-btn bk-full" @click="startCollabSession">{{ t('collabStart') }}</button>
+            </template>
+            <template v-else>
+              <div class="bk-cid">{{ t('collabNoRoomId') }}</div>
+            </template>
           </template>
-          <template v-else-if="!isWidget">
-            <button class="bk-sm-btn bk-full" @click="startCollabSession">{{ t('collabStart') }}</button>
-            <div class="bk-divider" />
-          </template>
+
+          <!-- ── IPFS tab ─────────────────────────────────────── -->
+          <template v-else>
 
           <!-- Mode -->
           <div class="bk-section">{{ t('ipfsMode') }}</div>
@@ -717,6 +732,8 @@
                  : shareToRoomStatus === 'error'   ? t('ipfsShareError')
                  : t('ipfsShareToRoom') }}
             </button>
+          </template>
+
           </template>
 
         </div>
@@ -1049,6 +1066,11 @@ async function shareToRoom() {
   shareToRoomStatus.value = ok ? 'sent' : 'error'
   if (ok) setTimeout(() => { shareToRoomStatus.value = 'idle' }, 2000)
 }
+
+// Which sub-tab of the Cloud popup is showing. Defaults to whichever is
+// actually relevant: sync when it's live or startable in-widget, IPFS backup
+// otherwise (the original, more commonly used standalone feature).
+const backupPopupTab = ref(isSyncActive || isWidget ? 'sync' : 'ipfs')
 
 // ── Standalone collaboration session (non-widget) ────────
 // Starts a new shared session: mints an id, moves the URL to /collab/<id>,
