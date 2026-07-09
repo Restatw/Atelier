@@ -855,20 +855,44 @@ ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '["Authorization
         IPFS Error: {{ startupErrorMsg }}
       </div>
 
-      <!-- Live collaboration presence -->
+      <!-- Live collaboration presence: sits on whichever side the toolbar
+           ISN'T on, so it never overlaps it. Collapsed to a stack of
+           avatars by default; click to expand into the named list. -->
       <div v-if="isSyncActive && participants.length"
-        style="position:fixed;right:8px;bottom:8px;z-index:9998;display:flex;flex-direction:column;gap:4px;align-items:flex-end;pointer-events:none">
-        <div v-for="p in participants" :key="p.socketId"
-          :style="{
-            display: 'flex', alignItems: 'center', gap: '5px',
-            background: 'rgba(0,0,0,0.55)', borderRadius: '999px',
-            padding: '3px 10px 3px 4px', fontSize: '11px', color: '#fff',
-            border: p.identity?.name === myIdentity.name ? '1px solid rgba(255,255,255,0.6)' : '1px solid transparent',
-          }">
-          <span :style="{ background: p.identity?.color || '#888', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px' }">
-            {{ p.identity?.emoji }}
+        :style="{ position: 'fixed', bottom: '8px', zIndex: 9998, [toolbarSide === 'right' ? 'left' : 'right']: '8px' }">
+
+        <div v-if="!presencePanelOpen" @click="presencePanelOpen = true"
+          style="display:flex;align-items:center;cursor:pointer;pointer-events:auto">
+          <span v-for="(p, i) in participants.slice(0, 5)" :key="p.socketId"
+            :style="{
+              background: p.identity?.color || '#888', borderRadius: '50%',
+              width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '12px', border: '1.5px solid #111',
+              marginLeft: i > 0 ? '-8px' : '0', zIndex: 10 - i,
+            }">{{ p.identity?.emoji }}</span>
+          <span v-if="participants.length > 5"
+            style="margin-left:2px;font-size:11px;color:#fff;background:rgba(0,0,0,0.55);border-radius:999px;padding:2px 6px">
+            +{{ participants.length - 5 }}
           </span>
-          <span>{{ p.identity?.name }}{{ p.identity?.name === myIdentity.name ? ` (${t('collabYou')})` : '' }}</span>
+        </div>
+
+        <div v-else style="display:flex;flex-direction:column;gap:4px;align-items:stretch;pointer-events:auto">
+          <div @click="presencePanelOpen = false"
+            style="display:flex;justify-content:flex-end;cursor:pointer;font-size:11px;color:#aaa;padding:2px">
+            {{ t('close') }} ✕
+          </div>
+          <div v-for="p in participants" :key="p.socketId"
+            :style="{
+              display: 'flex', alignItems: 'center', gap: '5px',
+              background: 'rgba(0,0,0,0.55)', borderRadius: '999px',
+              padding: '3px 10px 3px 4px', fontSize: '11px', color: '#fff',
+              border: p.identity?.name === myIdentity.name ? '1px solid rgba(255,255,255,0.6)' : '1px solid transparent',
+            }">
+            <span :style="{ background: p.identity?.color || '#888', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px' }">
+              {{ p.identity?.emoji }}
+            </span>
+            <span>{{ p.identity?.name }}{{ p.identity?.name === myIdentity.name ? ` (${t('collabYou')})` : '' }}</span>
+          </div>
         </div>
       </div>
 
@@ -1111,6 +1135,7 @@ function startCollabSession() {
 }
 
 const collabUrl = computed(() => window.location.origin + window.location.pathname)
+const presencePanelOpen = ref(false)
 
 // Participants (excluding self) currently on a given layer, for the tiny
 // avatar badges shown on each layer thumbnail.
