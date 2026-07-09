@@ -1,7 +1,7 @@
-import { ref, computed, reactive, nextTick } from 'vue'
+import { ref, computed, reactive, nextTick, watch } from 'vue'
 import { dbGet, dbPut, dbDelMany } from '../db.js'
 import { t } from '../i18n.js'
-import { pushCanvasUpdate } from '../collabSync.js'
+import { pushCanvasUpdate, pushActiveLayer } from '../collabSync.js'
 import { isSyncActive } from '../widgetContext.js'
 
 export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
@@ -18,6 +18,10 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   const isPanelOpen    = ref(true)
   const history        = ref([])
   const historyIndex   = ref(-1)
+
+  // Lets peers show an avatar badge on whichever layer this participant is
+  // currently working on (see App.vue's presence panel).
+  if (isSyncActive) watch(activeLayerId, id => pushActiveLayer(id))
 
   const activeIndex     = computed(() => layers.value.findIndex(l => l.id === activeLayerId.value))
   const activeLayer     = computed(() => layers.value[activeIndex.value] ?? null)
@@ -84,6 +88,19 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   // Guards against echoing a just-received remote update straight back out
   // to the sync server (see applyRemoteLayers below).
   let _applyingRemote = false
+  // Snapshot of what was last successfully pushed to the sync service, keyed
+  // by layer id — used to diff out only the layers that actually changed so
+  // an edit to one layer never overwrites another peer's concurrent edit to
+  // a different layer. See atelier-sync/server.js for the matching
+  // per-layer, rev-guarded merge on the receiving end.
+  const _lastSynced = new Map() // id -> { name, visible, opacity, dataURL }
+
+  function _layerDiffers(l, dataURL) {
+    const prev = _lastSynced.get(l.id)
+    if (!prev) return true
+    return prev.dataURL !== dataURL || prev.name !== l.name ||
+      prev.visible !== l.visible || prev.opacity !== l.opacity
+  }
 
   async function persistToStorage() {
     const meta    = layers.value.map(l => ({ id: l.id, name: l.name, visible: l.visible, opacity: l.opacity }))
@@ -102,48 +119,97 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     await Promise.all(layers.value.map((l, i) => dbPut(`layer-${l.id}`, dataURLs[i])))
 
     if (isSyncActive && !_applyingRemote) {
-      pushCanvasUpdate({
-        canvasW: canvasLogicalW.value,
-        canvasH: canvasLogicalH.value,
-        activeLayerId: activeLayerId.value,
-        layers: layers.value.map((l, i) => ({
-          id: l.id, name: l.name, visible: l.visible, opacity: l.opacity, dataURL: dataURLs[i],
-        })),
-      })
+      const currentIds = new Set(layers.value.map(l => l.id))
+      const removedLayerIds = Array.from(_lastSynced.keys()).filter(id => !currentIds.has(id))
+      const changed = layers.value
+        .map((l, i) => ({ l, dataURL: dataURLs[i] }))
+        .filter(({ l, dataURL }) => _layerDiffers(l, dataURL))
+        .map(({ l, dataURL }) => ({
+          id: l.id, name: l.name, visible: l.visible, opacity: l.opacity,
+          dataURL, rev: Date.now(),
+        }))
+
+      if (changed.length || removedLayerIds.length) {
+        pushCanvasUpdate({
+          canvasW: canvasLogicalW.value,
+          canvasH: canvasLogicalH.value,
+          layerOrder: layers.value.map(l => l.id),
+          layers: changed,
+          removedLayerIds,
+        })
+      }
+
+      _lastSynced.clear()
+      layers.value.forEach((l, i) => _lastSynced.set(l.id, {
+        name: l.name, visible: l.visible, opacity: l.opacity, dataURL: dataURLs[i],
+      }))
     }
   }
 
-  // Applies a layer snapshot received from a peer via the sync service.
-  // Bypasses saveHistory() (remote changes don't pollute local undo) but
-  // still persists locally so a refresh doesn't lose the synced state.
+  // Merges a partial layer update received from a peer via the sync
+  // service. Only touches the layers actually present in the payload —
+  // everything else in local state is left alone. Bypasses saveHistory()
+  // (remote changes don't pollute local undo) but still persists locally so
+  // a refresh doesn't lose the synced state.
   async function applyRemoteLayers(payload) {
-    if (!payload?.layers || !canvasRef.value) return
+    if (!payload || !canvasRef.value) return
     _applyingRemote = true
     try {
       const w = payload.canvasW || canvasLogicalW.value
       const h = payload.canvasH || canvasLogicalH.value
-      canvasLogicalW.value   = w
-      canvasLogicalH.value   = h
-      canvasRef.value.width  = w
-      canvasRef.value.height = h
-      canvasSize.value = { w, h }
+      if (w !== canvasLogicalW.value || h !== canvasLogicalH.value) {
+        canvasLogicalW.value   = w
+        canvasLogicalH.value   = h
+        canvasRef.value.width  = w
+        canvasRef.value.height = h
+        canvasSize.value = { w, h }
+        for (const layer of layers.value) { layer.canvas.width = w; layer.canvas.height = h }
+      }
 
-      const restored = await Promise.all(
-        payload.layers.map(meta => new Promise(resolve => {
+      const byId = new Map(layers.value.map(l => [l.id, l]))
+
+      for (const incoming of payload.layers || []) {
+        const existing = byId.get(incoming.id)
+        if (existing) {
+          existing.name    = incoming.name
+          existing.visible = incoming.visible
+          existing.opacity = incoming.opacity
+          if (incoming.dataURL) {
+            await new Promise(resolve => {
+              const img = new Image()
+              img.onload  = () => { existing.canvas.getContext('2d').clearRect(0, 0, w, h); existing.canvas.getContext('2d').drawImage(img, 0, 0); resolve() }
+              img.onerror = resolve
+              img.src = incoming.dataURL
+            })
+          }
+        } else {
           const canvas = createLayerCanvas(w, h)
-          if (!meta.dataURL) { resolve({ id: meta.id, name: meta.name, visible: meta.visible, opacity: meta.opacity, canvas }); return }
-          const img = new Image()
-          img.onload  = () => { canvas.getContext('2d').drawImage(img, 0, 0); resolve({ id: meta.id, name: meta.name, visible: meta.visible, opacity: meta.opacity, canvas }) }
-          img.onerror = () => resolve({ id: meta.id, name: meta.name, visible: meta.visible, opacity: meta.opacity, canvas })
-          img.src = meta.dataURL
-        }))
-      )
+          if (incoming.dataURL) {
+            await new Promise(resolve => {
+              const img = new Image()
+              img.onload  = () => { canvas.getContext('2d').drawImage(img, 0, 0); resolve() }
+              img.onerror = resolve
+              img.src = incoming.dataURL
+            })
+          }
+          const layer = { id: incoming.id, name: incoming.name, visible: incoming.visible, opacity: incoming.opacity, canvas }
+          byId.set(incoming.id, layer)
+          layerIdSeq = Math.max(layerIdSeq, incoming.id)
+        }
+      }
 
-      layerIdSeq = Math.max(layerIdSeq, ...restored.map(l => l.id), 0)
-      layers.value = restored
-      activeLayerId.value = payload.activeLayerId ?? restored.at(-1)?.id ?? null
-      if (!restored.find(l => l.id === activeLayerId.value))
-        activeLayerId.value = restored.at(-1)?.id ?? null
+      for (const id of payload.removedLayerIds || []) byId.delete(id)
+
+      // Reorder according to the authoritative layerOrder, keeping any
+      // locally-known layer that hasn't appeared in an order list yet
+      // (e.g. one we just created and haven't synced back out) at the end.
+      const order = payload.layerOrder || Array.from(byId.keys())
+      const ordered = order.filter(id => byId.has(id)).map(id => byId.get(id))
+      for (const [id, layer] of byId) if (!order.includes(id)) ordered.push(layer)
+
+      layers.value = ordered
+      if (!ordered.find(l => l.id === activeLayerId.value))
+        activeLayerId.value = ordered.at(-1)?.id ?? null
 
       composite()
       await persistToStorage()

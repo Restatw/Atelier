@@ -162,11 +162,21 @@
                 <EyeOff v-else :size="11" style="opacity:0.4" />
               </button>
             </div>
-            <canvas
-              class="thumb"
-              :ref="el => { if (el) thumbRefs[layer.id] = el; else delete thumbRefs[layer.id] }"
-              width="44" height="33"
-            />
+            <div style="position:relative">
+              <canvas
+                class="thumb"
+                :ref="el => { if (el) thumbRefs[layer.id] = el; else delete thumbRefs[layer.id] }"
+                width="44" height="33"
+              />
+              <div v-if="isSyncActive && layerParticipants(layer.id).length"
+                style="position:absolute;bottom:-4px;right:-4px;display:flex;gap:1px">
+                <span v-for="p in layerParticipants(layer.id)" :key="p.socketId"
+                  :title="p.identity?.name"
+                  :style="{ background: p.identity?.color || '#888', borderRadius: '50%', width: '14px', height: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', border: '1px solid rgba(0,0,0,0.4)' }">
+                  {{ p.identity?.emoji }}
+                </span>
+              </div>
+            </div>
             <div class="layer-meta">
               <input
                 v-if="editingId === layer.id"
@@ -630,7 +640,7 @@
           <template v-if="backupPopupTab === 'sync'">
             <template v-if="isSyncActive">
               <div class="bk-section">{{ t('collabLive') }}</div>
-              <div class="bk-cid">{{ t('collabPeoplePrefix') }} {{ presenceCount }}</div>
+              <div class="bk-cid">{{ t('collabPeoplePrefix') }} {{ participants.length }}</div>
               <template v-if="isCollabSession">
                 <div class="bk-label">{{ t('collabShareUrl') }}</div>
                 <div class="bk-cid">{{ collabUrl }}</div>
@@ -845,6 +855,23 @@ ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '["Authorization
         IPFS Error: {{ startupErrorMsg }}
       </div>
 
+      <!-- Live collaboration presence -->
+      <div v-if="isSyncActive && participants.length"
+        style="position:fixed;right:8px;bottom:8px;z-index:9998;display:flex;flex-direction:column;gap:4px;align-items:flex-end;pointer-events:none">
+        <div v-for="p in participants" :key="p.socketId"
+          :style="{
+            display: 'flex', alignItems: 'center', gap: '5px',
+            background: 'rgba(0,0,0,0.55)', borderRadius: '999px',
+            padding: '3px 10px 3px 4px', fontSize: '11px', color: '#fff',
+            border: p.identity?.name === myIdentity.name ? '1px solid rgba(255,255,255,0.6)' : '1px solid transparent',
+          }">
+          <span :style="{ background: p.identity?.color || '#888', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px' }">
+            {{ p.identity?.emoji }}
+          </span>
+          <span>{{ p.identity?.name }}{{ p.identity?.name === myIdentity.name ? ` (${t('collabYou')})` : '' }}</span>
+        </div>
+      </div>
+
     </Teleport>
   </div>
 </template>
@@ -870,7 +897,7 @@ import {
 import { useIpfsBackup } from './composables/useIpfsBackup.js'
 import { isWidget, isSyncActive, isCollabSession, generateCollabSessionId } from './widgetContext.js'
 import { sendRoomMessage } from './widgetApi.js'
-import { initCollabSync, presenceCount, syncConnected } from './collabSync.js'
+import { initCollabSync, participants, myIdentity, syncConnected } from './collabSync.js'
 
 // ── Store ─────────────────────────────────────────────────
 const paintStore = usePaintStore()
@@ -1084,6 +1111,12 @@ function startCollabSession() {
 }
 
 const collabUrl = computed(() => window.location.origin + window.location.pathname)
+
+// Participants (excluding self) currently on a given layer, for the tiny
+// avatar badges shown on each layer thumbnail.
+function layerParticipants(layerId) {
+  return participants.value.filter(p => p.activeLayerId === layerId)
+}
 
 const copiedKey       = ref('')
 const startupErrorMsg = ref('')
