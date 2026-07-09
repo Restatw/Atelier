@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import { createPersistedState } from 'pinia-plugin-persistedstate'
 import App from './App.vue'
 import './style.css'
+import { initWidgetApi } from './widgetApi.js'
 
 const VERSION_KEY = 'atelier-version'
 const CURRENT     = __APP_VERSION__
@@ -33,6 +34,9 @@ async function bootstrap() {
   pinia.use(createPersistedState())
   app.use(pinia)
   app.mount('#app')
+
+  // No-op outside of an Element/Matrix widget context.
+  initWidgetApi()
 }
 
 bootstrap()

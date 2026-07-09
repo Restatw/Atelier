@@ -1,4 +1,9 @@
-const DB_NAME  = 'paint-app'
+import { roomNamespace } from './widgetContext.js'
+
+// Each room a widget instance is added to gets its own IndexedDB database,
+// so canvases don't bleed between rooms. Standalone (non-widget) use keeps
+// the original database name for backward compatibility with existing data.
+const DB_NAME  = roomNamespace ? `paint-app-${roomNamespace}` : 'paint-app'
 const STORE    = 'layers'
 let _db = null
 

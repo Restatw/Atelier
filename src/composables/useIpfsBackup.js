@@ -1,11 +1,17 @@
 import { ref } from 'vue'
 import { uploadToIPFS, getContentUrl } from '../ipfs.js'
+import { roomNamespace } from '../widgetContext.js'
+
+// Standalone use keeps the original keys (backward compatible); widget use
+// namespaces them per room so the "last backup" pointer doesn't leak across rooms.
+const CID_KEY   = roomNamespace ? `atelier-last-cid-${roomNamespace}`   : 'atelier-last-cid'
+const THUMB_KEY = roomNamespace ? `atelier-last-thumb-${roomNamespace}` : 'atelier-last-thumb'
 
 export function useIpfsBackup({ getProjectData, getThumbnail, restoreProject, paintStore }) {
   const status       = ref('idle')   // 'idle' | 'uploading' | 'restoring' | 'done' | 'error'
   const statusMsg    = ref('')
-  const lastCid      = ref(localStorage.getItem('atelier-last-cid') ?? '')
-  const lastThumbCid = ref(localStorage.getItem('atelier-last-thumb') ?? '')
+  const lastCid      = ref(localStorage.getItem(CID_KEY) ?? '')
+  const lastThumbCid = ref(localStorage.getItem(THUMB_KEY) ?? '')
   const restoreCid   = ref('')
   const gatewayHint  = ref('')       // 'pinata' | full URL | '' — set before restoreFromCid()
 
@@ -26,7 +32,7 @@ export function useIpfsBackup({ getProjectData, getThumbnail, restoreProject, pa
       const { blob, filename } = getProjectData()
       const cid = await uploadToIPFS(blob, filename, cfg)
       lastCid.value = cid
-      localStorage.setItem('atelier-last-cid', cid)
+      localStorage.setItem(CID_KEY, cid)
 
       // Upload OG thumbnail (best-effort — failure doesn't abort backup)
       if (getThumbnail) {
@@ -34,7 +40,7 @@ export function useIpfsBackup({ getProjectData, getThumbnail, restoreProject, pa
           const thumbBlob = await getThumbnail()
           const thumbCid  = await uploadToIPFS(thumbBlob, `thumb-${Date.now()}.jpg`, cfg)
           lastThumbCid.value = thumbCid
-          localStorage.setItem('atelier-last-thumb', thumbCid)
+          localStorage.setItem(THUMB_KEY, thumbCid)
         } catch { /* thumbnail failure is non-fatal */ }
       }
 
@@ -115,7 +121,7 @@ export function useIpfsBackup({ getProjectData, getThumbnail, restoreProject, pa
       const project = await res.json()
       await restoreProject(project)
       lastCid.value    = cid
-      localStorage.setItem('atelier-last-cid', cid)
+      localStorage.setItem(CID_KEY, cid)
       restoreCid.value = ''
       status.value     = 'done'
     } catch (e) {
