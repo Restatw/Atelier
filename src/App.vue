@@ -629,6 +629,25 @@
         <template #icon><CloudUpload :size="16" /></template>
         <div style="display:flex;flex-direction:column;gap:8px">
 
+          <!-- Live collaboration -->
+          <template v-if="isSyncActive">
+            <div class="bk-section">{{ t('collabLive') }}</div>
+            <div class="bk-cid">{{ t('collabPeoplePrefix') }} {{ presenceCount }}</div>
+            <template v-if="isCollabSession">
+              <div class="bk-label">{{ t('collabShareUrl') }}</div>
+              <div class="bk-cid">{{ collabUrl }}</div>
+              <button class="bk-sm-btn bk-full" :class="{ 'bk-copied': copiedKey === 'collab' }"
+                @click="copyText(collabUrl, 'collab')">
+                {{ copiedKey === 'collab' ? t('ipfsCopied') : t('ipfsCopyUrl') }}
+              </button>
+            </template>
+            <div class="bk-divider" />
+          </template>
+          <template v-else-if="!isWidget">
+            <button class="bk-sm-btn bk-full" @click="startCollabSession">{{ t('collabStart') }}</button>
+            <div class="bk-divider" />
+          </template>
+
           <!-- Mode -->
           <div class="bk-section">{{ t('ipfsMode') }}</div>
           <div class="sp-lang-btns">
@@ -830,8 +849,9 @@ import {
   Type, Bold, Italic
 } from 'lucide-vue-next'
 import { useIpfsBackup } from './composables/useIpfsBackup.js'
-import { isWidget } from './widgetContext.js'
+import { isWidget, isSyncActive, isCollabSession, generateCollabSessionId } from './widgetContext.js'
 import { sendRoomMessage } from './widgetApi.js'
+import { initCollabSync, presenceCount, syncConnected } from './collabSync.js'
 
 // ── Store ─────────────────────────────────────────────────
 const paintStore = usePaintStore()
@@ -1029,6 +1049,18 @@ async function shareToRoom() {
   shareToRoomStatus.value = ok ? 'sent' : 'error'
   if (ok) setTimeout(() => { shareToRoomStatus.value = 'idle' }, 2000)
 }
+
+// ── Standalone collaboration session (non-widget) ────────
+// Starts a new shared session: mints an id, moves the URL to /collab/<id>,
+// and reloads so widgetContext.js (which reads location.pathname once, at
+// module load) picks it up and connects the sync socket from a clean state.
+function startCollabSession() {
+  const id = generateCollabSessionId()
+  window.history.pushState({}, '', `/collab/${id}`)
+  window.location.reload()
+}
+
+const collabUrl = computed(() => window.location.origin + window.location.pathname)
 
 const copiedKey       = ref('')
 const startupErrorMsg = ref('')
@@ -2589,6 +2621,8 @@ onMounted(async () => {
   await nextTick()
   vw.resizeCanvas(wrapperRef.value)
   await lc.init()
+
+  initCollabSync({ onRemoteUpdate: lc.applyRemoteLayers })
 
   changelogOpen.value = true
 

@@ -1,6 +1,8 @@
 import { ref, computed, reactive, nextTick } from 'vue'
 import { dbGet, dbPut, dbDelMany } from '../db.js'
 import { t } from '../i18n.js'
+import { pushCanvasUpdate } from '../collabSync.js'
+import { isSyncActive } from '../widgetContext.js'
 
 export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   let layerIdSeq = 0
@@ -79,6 +81,10 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     _persistTimer = setTimeout(persistToStorage, 600)
   }
 
+  // Guards against echoing a just-received remote update straight back out
+  // to the sync server (see applyRemoteLayers below).
+  let _applyingRemote = false
+
   async function persistToStorage() {
     const meta    = layers.value.map(l => ({ id: l.id, name: l.name, visible: l.visible, opacity: l.opacity }))
     const oldIds  = paintStore.layersMeta.map(m => `layer-${m.id}`)
@@ -92,7 +98,58 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     paintStore.layerIdSeq    = layerIdSeq
 
     await dbDelMany(toDelete)
-    await Promise.all(layers.value.map(l => dbPut(`layer-${l.id}`, l.canvas.toDataURL())))
+    const dataURLs = await Promise.all(layers.value.map(l => Promise.resolve(l.canvas.toDataURL())))
+    await Promise.all(layers.value.map((l, i) => dbPut(`layer-${l.id}`, dataURLs[i])))
+
+    if (isSyncActive && !_applyingRemote) {
+      pushCanvasUpdate({
+        canvasW: canvasLogicalW.value,
+        canvasH: canvasLogicalH.value,
+        activeLayerId: activeLayerId.value,
+        layers: layers.value.map((l, i) => ({
+          id: l.id, name: l.name, visible: l.visible, opacity: l.opacity, dataURL: dataURLs[i],
+        })),
+      })
+    }
+  }
+
+  // Applies a layer snapshot received from a peer via the sync service.
+  // Bypasses saveHistory() (remote changes don't pollute local undo) but
+  // still persists locally so a refresh doesn't lose the synced state.
+  async function applyRemoteLayers(payload) {
+    if (!payload?.layers || !canvasRef.value) return
+    _applyingRemote = true
+    try {
+      const w = payload.canvasW || canvasLogicalW.value
+      const h = payload.canvasH || canvasLogicalH.value
+      canvasLogicalW.value   = w
+      canvasLogicalH.value   = h
+      canvasRef.value.width  = w
+      canvasRef.value.height = h
+      canvasSize.value = { w, h }
+
+      const restored = await Promise.all(
+        payload.layers.map(meta => new Promise(resolve => {
+          const canvas = createLayerCanvas(w, h)
+          if (!meta.dataURL) { resolve({ id: meta.id, name: meta.name, visible: meta.visible, opacity: meta.opacity, canvas }); return }
+          const img = new Image()
+          img.onload  = () => { canvas.getContext('2d').drawImage(img, 0, 0); resolve({ id: meta.id, name: meta.name, visible: meta.visible, opacity: meta.opacity, canvas }) }
+          img.onerror = () => resolve({ id: meta.id, name: meta.name, visible: meta.visible, opacity: meta.opacity, canvas })
+          img.src = meta.dataURL
+        }))
+      )
+
+      layerIdSeq = Math.max(layerIdSeq, ...restored.map(l => l.id), 0)
+      layers.value = restored
+      activeLayerId.value = payload.activeLayerId ?? restored.at(-1)?.id ?? null
+      if (!restored.find(l => l.id === activeLayerId.value))
+        activeLayerId.value = restored.at(-1)?.id ?? null
+
+      composite()
+      await persistToStorage()
+    } finally {
+      _applyingRemote = false
+    }
   }
 
   function saveHistory() {
@@ -459,6 +516,6 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     addLayer, duplicateLayer, deleteActiveLayer,
     toggleVisible, moveUp, moveDown, mergeDown, mergeAll, clearLayer,
     download, doExport, importImageLayer, getThumbnailBlob, getProjectData, exportProject, loadProject,
-    resetToBlank, resizeCanvasTo, init,
+    resetToBlank, resizeCanvasTo, init, applyRemoteLayers,
   }
 }
