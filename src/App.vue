@@ -4,8 +4,8 @@
       <span>{{ toolLabel }}</span>
       <span v-if="cursorPos"> | {{ cursorPos.x }}, {{ cursorPos.y }}</span>
       <span v-if="activeLayer"> | {{ activeLayer.name }}</span>
-      <span v-if="activeLayerCollaborators.length" class="layer-conflict-warning" :title="t('layerConflictPrefix') + ' ' + activeLayerCollaborators.map(p => p.identity?.name).join(', ')">
-        ⚠️ {{ t('layerConflictPrefix') }} {{ activeLayerCollaborators.map(p => `${p.identity?.emoji || ''} ${p.identity?.name || ''}`).join(', ') }}
+      <span v-if="activeLayerCollaborators.length" class="layer-conflict-warning" :title="t('layerConflictPrefix') + ' ' + activeLayerCollaborators.map(id => id?.name).join(', ')">
+        ⚠️ {{ t('layerConflictPrefix') }} {{ activeLayerCollaborators.map(id => `${id?.emoji || ''} ${id?.name || ''}`).join(', ') }}
       </span>
       <span style="margin-left:auto;padding-right: 8px;">{{ canvasSize.w }} × {{ canvasSize.h }}  |  {{ t('layerCountPrefix') }}{{ layers.length }} {{ t('layerCountUnit') }}  |  {{ Math.round(viewZoom * 100) }}%</span>
     </div>
@@ -924,7 +924,7 @@ import {
 import { useIpfsBackup } from './composables/useIpfsBackup.js'
 import { isWidget, isSyncActive, isCollabSession, generateCollabSessionId } from './widgetContext.js'
 import { sendRoomMessage } from './widgetApi.js'
-import { initCollabSync, participants, myIdentity, syncConnected } from './collabSync.js'
+import { initCollabSync, participants, myIdentity, syncConnected, recentEdits, RECENT_EDIT_WINDOW_MS } from './collabSync.js'
 
 // ── Store ─────────────────────────────────────────────────
 const paintStore = usePaintStore()
@@ -1146,12 +1146,29 @@ function layerParticipants(layerId) {
   return participants.value.filter(p => p.activeLayerId === layerId && p.identity?.name !== myIdentity.name)
 }
 
-// Whoever else is on the SAME layer the local user currently has active —
+// Whoever else has *actually edited* (not just selected) the layer the
+// local user currently has active, within the last RECENT_EDIT_WINDOW_MS —
 // drives a heads-up banner near the canvas, since two people drawing on one
 // layer overwrite each other's work (whole-layer last-write-wins, no
-// pixel-level merge) and the layer panel with its thumbnail badges may not
-// even be open while actively drawing.
-const activeLayerCollaborators = computed(() => layerParticipants(activeLayerId.value))
+// pixel-level merge). Deliberately distinct from layerParticipants() above:
+// merely having a layer selected isn't worth warning about, only recent
+// real edits are. `nowTick` exists purely so this recomputes as time
+// passes even when no new sync events arrive (otherwise a warning would
+// never clear once the window elapses without a fresh event to trigger it).
+const nowTick = ref(Date.now())
+let nowTickTimer = null
+const activeLayerCollaborators = computed(() => {
+  const cutoff = nowTick.value - RECENT_EDIT_WINDOW_MS
+  const latestByName = new Map()
+  for (const e of recentEdits.value) {
+    if (e.layerId !== activeLayerId.value) continue
+    if (e.identity?.name === myIdentity.name) continue
+    if (e.timestamp < cutoff) continue
+    const prev = latestByName.get(e.identity?.name)
+    if (!prev || prev.timestamp < e.timestamp) latestByName.set(e.identity?.name, e)
+  }
+  return Array.from(latestByName.values()).map(e => e.identity)
+})
 
 const copiedKey       = ref('')
 const startupErrorMsg = ref('')
@@ -2731,6 +2748,7 @@ onMounted(async () => {
   await lc.init()
 
   initCollabSync({ onRemoteUpdate: queueOrApplyRemoteUpdate })
+  if (isSyncActive) nowTickTimer = setInterval(() => { nowTick.value = Date.now() }, 5000)
 
   changelogOpen.value = true
 
@@ -2766,6 +2784,7 @@ onUnmounted(() => {
   window.removeEventListener('mouseup',   onSnMouseUp)
   window.removeEventListener('touchmove', onSnTouchMove)
   window.removeEventListener('touchend',  onSnMouseUp)
+  if (nowTickTimer) clearInterval(nowTickTimer)
 })
 </script>
 
