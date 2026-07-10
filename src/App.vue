@@ -171,7 +171,7 @@
               <div v-if="isSyncActive && layerParticipants(layer.id).length"
                 style="position:absolute;bottom:-4px;right:-4px;display:flex;gap:1px">
                 <span v-for="p in layerParticipants(layer.id)" :key="p.socketId"
-                  :title="p.identity?.name"
+                  :title="identityName(p.identity)"
                   :style="{ background: p.identity?.color || '#888', borderRadius: '50%', width: '14px', height: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', border: '1px solid rgba(0,0,0,0.4)' }">
                   {{ p.identity?.emoji }}
                 </span>
@@ -887,7 +887,7 @@ ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '["Authorization
               display: 'flex', alignItems: 'center', gap: '5px',
               background: 'rgba(0,0,0,0.55)', borderRadius: '999px',
               padding: '3px 10px 3px 4px', fontSize: '11px', color: '#fff',
-              border: p.identity?.name === myIdentity.name ? '1px solid rgba(255,255,255,0.6)' : '1px solid transparent',
+              border: p.identity?.id === myIdentity.id ? '1px solid rgba(255,255,255,0.6)' : '1px solid transparent',
             }">
             <span :title="isEditingMyLayer(p) ? t('layerConflictPrefix') : undefined"
               :style="{
@@ -897,7 +897,7 @@ ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '["Authorization
               }">
               {{ p.identity?.emoji }}
             </span>
-            <span>{{ p.identity?.name }}{{ p.identity?.name === myIdentity.name ? ` (${t('collabYou')})` : '' }}</span>
+            <span>{{ identityName(p.identity) }}{{ p.identity?.id === myIdentity.id ? ` (${t('collabYou')})` : '' }}</span>
           </div>
         </div>
       </div>
@@ -926,6 +926,7 @@ import {
 } from 'lucide-vue-next'
 import { useIpfsBackup } from './composables/useIpfsBackup.js'
 import { isWidget, isSyncActive, isCollabSession, generateCollabSessionId } from './widgetContext.js'
+import { formatIdentityName } from './collabIdentity.js'
 import { sendRoomMessage } from './widgetApi.js'
 import { initCollabSync, participants, myIdentity, syncConnected, recentEdits, RECENT_EDIT_WINDOW_MS } from './collabSync.js'
 
@@ -1143,10 +1144,17 @@ function startCollabSession() {
 const collabUrl = computed(() => window.location.origin + window.location.pathname)
 const presencePanelOpen = ref(false)
 
+// Renders an identity in the viewer's OWN current locale, not whatever
+// locale its owner had when the identity was generated — see
+// collabIdentity.js for why the name isn't just baked into the identity.
+function identityName(identity) {
+  return formatIdentityName(identity, locale.value)
+}
+
 // Participants (excluding self) currently on a given layer, for the tiny
 // avatar badges shown on each layer thumbnail.
 function layerParticipants(layerId) {
-  return participants.value.filter(p => p.activeLayerId === layerId && p.identity?.name !== myIdentity.name)
+  return participants.value.filter(p => p.activeLayerId === layerId && p.identity?.id !== myIdentity.id)
 }
 
 // Whoever else has *actually edited* (not just selected) the layer the
@@ -1162,22 +1170,22 @@ const nowTick = ref(Date.now())
 let nowTickTimer = null
 const activeLayerCollaborators = computed(() => {
   const cutoff = nowTick.value - RECENT_EDIT_WINDOW_MS
-  const latestByName = new Map()
+  const latestById = new Map()
   for (const e of recentEdits.value) {
     if (e.layerId !== activeLayerId.value) continue
-    if (e.identity?.name === myIdentity.name) continue
+    if (e.identity?.id === myIdentity.id) continue
     if (e.timestamp < cutoff) continue
-    const prev = latestByName.get(e.identity?.name)
-    if (!prev || prev.timestamp < e.timestamp) latestByName.set(e.identity?.name, e)
+    const prev = latestById.get(e.identity?.id)
+    if (!prev || prev.timestamp < e.timestamp) latestById.set(e.identity?.id, e)
   }
-  return Array.from(latestByName.values()).map(e => e.identity)
+  return Array.from(latestById.values()).map(e => e.identity)
 })
 
 // Drives the amber avatar-border highlight in the presence panel, instead
 // of a separate banner — a participant who's recently edited the layer the
 // local user has active right now.
 function isEditingMyLayer(p) {
-  return activeLayerCollaborators.value.some(id => id?.name === p.identity?.name)
+  return activeLayerCollaborators.value.some(id => id?.id === p.identity?.id)
 }
 
 const copiedKey       = ref('')

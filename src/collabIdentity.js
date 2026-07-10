@@ -2,67 +2,77 @@
 // "紅色頑皮海豹" / "Playful Red Seal" style — used purely for presence
 // display (who's here, who's on which layer). Not tied to any Matrix/
 // account identity.
-import { locale } from './i18n.js'
+//
+// The identity object carries locale-independent KEYS (colorKey/moodKey/
+// animalKey) plus an `id` for equality checks, not a pre-formatted name.
+// It's generated once and broadcast as-is to every peer, so if it baked in
+// a display string, everyone would see it in whichever locale its owner
+// happened to have at generation time — a Chinese-locale user and an
+// English-locale user in the same room would get a mixed-language list,
+// and switching locale wouldn't update anything already generated. Instead
+// each viewer calls formatIdentityName() at render time with their OWN
+// current locale, so names stay consistent with whoever's looking and
+// update immediately on a locale switch.
+const COLORS = [
+  { key: 'red',    hex: '#ef4444', zh: '紅色', en: 'Red' },
+  { key: 'orange', hex: '#f97316', zh: '橙色', en: 'Orange' },
+  { key: 'yellow', hex: '#eab308', zh: '黃色', en: 'Yellow' },
+  { key: 'green',  hex: '#22c55e', zh: '綠色', en: 'Green' },
+  { key: 'blue',   hex: '#3b82f6', zh: '藍色', en: 'Blue' },
+  { key: 'purple', hex: '#8b5cf6', zh: '紫色', en: 'Purple' },
+  { key: 'pink',   hex: '#ec4899', zh: '粉色', en: 'Pink' },
+]
 
-const WORDS = {
-  zh: {
-    colors:  [
-      { name: '紅色', hex: '#ef4444' },
-      { name: '橙色', hex: '#f97316' },
-      { name: '黃色', hex: '#eab308' },
-      { name: '綠色', hex: '#22c55e' },
-      { name: '藍色', hex: '#3b82f6' },
-      { name: '紫色', hex: '#8b5cf6' },
-      { name: '粉色', hex: '#ec4899' },
-    ],
-    moods:   ['頑皮', '開心', '冷靜', '好奇', '慵懶', '專注', '神秘'],
-    animals: [
-      { name: '海豹',   emoji: '🦭' },
-      { name: '貓咪',   emoji: '🐱' },
-      { name: '狐狸',   emoji: '🦊' },
-      { name: '熊熊',   emoji: '🐻' },
-      { name: '兔子',   emoji: '🐰' },
-      { name: '貓頭鷹', emoji: '🦉' },
-      { name: '水獺',   emoji: '🦦' },
-    ],
-    format: (color, mood, animal) => `${color}${mood}${animal}`,
-  },
-  en: {
-    colors:  [
-      { name: 'Red',    hex: '#ef4444' },
-      { name: 'Orange', hex: '#f97316' },
-      { name: 'Yellow', hex: '#eab308' },
-      { name: 'Green',  hex: '#22c55e' },
-      { name: 'Blue',   hex: '#3b82f6' },
-      { name: 'Purple', hex: '#8b5cf6' },
-      { name: 'Pink',   hex: '#ec4899' },
-    ],
-    moods:   ['Playful', 'Cheerful', 'Calm', 'Curious', 'Sleepy', 'Focused', 'Mysterious'],
-    animals: [
-      { name: 'Seal',  emoji: '🦭' },
-      { name: 'Cat',   emoji: '🐱' },
-      { name: 'Fox',   emoji: '🦊' },
-      { name: 'Bear',  emoji: '🐻' },
-      { name: 'Rabbit', emoji: '🐰' },
-      { name: 'Owl',   emoji: '🦉' },
-      { name: 'Otter', emoji: '🦦' },
-    ],
-    format: (color, mood, animal) => `${mood} ${color} ${animal}`,
-  },
-}
+const MOODS = [
+  { key: 'playful',     zh: '頑皮', en: 'Playful' },
+  { key: 'cheerful',    zh: '開心', en: 'Cheerful' },
+  { key: 'calm',        zh: '冷靜', en: 'Calm' },
+  { key: 'curious',     zh: '好奇', en: 'Curious' },
+  { key: 'sleepy',      zh: '慵懶', en: 'Sleepy' },
+  { key: 'focused',     zh: '專注', en: 'Focused' },
+  { key: 'mysterious',  zh: '神秘', en: 'Mysterious' },
+]
+
+const ANIMALS = [
+  { key: 'seal',   emoji: '🦭', zh: '海豹',   en: 'Seal' },
+  { key: 'cat',    emoji: '🐱', zh: '貓咪',   en: 'Cat' },
+  { key: 'fox',    emoji: '🦊', zh: '狐狸',   en: 'Fox' },
+  { key: 'bear',   emoji: '🐻', zh: '熊熊',   en: 'Bear' },
+  { key: 'rabbit', emoji: '🐰', zh: '兔子',   en: 'Rabbit' },
+  { key: 'owl',    emoji: '🦉', zh: '貓頭鷹', en: 'Owl' },
+  { key: 'otter',  emoji: '🦦', zh: '水獺',   en: 'Otter' },
+]
 
 function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)]
 }
 
 export function generateIdentity() {
-  const words  = WORDS[locale.value] || WORDS.en
-  const color  = pick(words.colors)
-  const mood   = pick(words.moods)
-  const animal = pick(words.animals)
+  const color  = pick(COLORS)
+  const mood   = pick(MOODS)
+  const animal = pick(ANIMALS)
   return {
-    name:  words.format(color.name, mood, animal.name),
-    emoji: animal.emoji,
-    color: color.hex,
+    // Locale-independent, stable for the whole session — use this (not the
+    // formatted name) for "is this me" / "same person" comparisons.
+    id: `${color.key}-${mood.key}-${animal.key}-${Math.random().toString(36).slice(2, 7)}`,
+    colorKey:  color.key,
+    moodKey:   mood.key,
+    animalKey: animal.key,
+    emoji:     animal.emoji,
+    color:     color.hex,
   }
+}
+
+// Renders an identity's display name in the given locale ('zh' or
+// anything else falls back to 'en'). Call this at render time with the
+// viewer's own current locale — never cache the result.
+export function formatIdentityName(identity, loc) {
+  if (!identity) return ''
+  const color  = COLORS.find(c => c.key === identity.colorKey)
+  const mood   = MOODS.find(m => m.key === identity.moodKey)
+  const animal = ANIMALS.find(a => a.key === identity.animalKey)
+  if (!color || !mood || !animal) return identity.name || ''
+  return loc === 'zh'
+    ? `${color.zh}${mood.zh}${animal.zh}`
+    : `${mood.en} ${color.en} ${animal.en}`
 }

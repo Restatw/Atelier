@@ -26,7 +26,7 @@ function recordEdit(payload) {
   if (!payload.identity) return
   const now = Date.now()
   for (const l of payload.layers || []) {
-    const idx = recentEdits.value.findIndex(e => e.layerId === l.id && e.identity?.name === payload.identity.name)
+    const idx = recentEdits.value.findIndex(e => e.layerId === l.id && e.identity?.id === payload.identity.id)
     const entry = { layerId: l.id, identity: payload.identity, timestamp: now }
     if (idx !== -1) recentEdits.value[idx] = entry
     else recentEdits.value.push(entry)
