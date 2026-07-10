@@ -4,6 +4,9 @@
       <span>{{ toolLabel }}</span>
       <span v-if="cursorPos"> | {{ cursorPos.x }}, {{ cursorPos.y }}</span>
       <span v-if="activeLayer"> | {{ activeLayer.name }}</span>
+      <span v-if="activeLayerCollaborators.length" class="layer-conflict-warning" :title="t('layerConflictPrefix') + ' ' + activeLayerCollaborators.map(p => p.identity?.name).join(', ')">
+        ⚠️ {{ t('layerConflictPrefix') }} {{ activeLayerCollaborators.map(p => `${p.identity?.emoji || ''} ${p.identity?.name || ''}`).join(', ') }}
+      </span>
       <span style="margin-left:auto;padding-right: 8px;">{{ canvasSize.w }} × {{ canvasSize.h }}  |  {{ t('layerCountPrefix') }}{{ layers.length }} {{ t('layerCountUnit') }}  |  {{ Math.round(viewZoom * 100) }}%</span>
     </div>
     <!-- ── Canvas + toolbar ───────────────────────────── -->
@@ -1140,8 +1143,15 @@ const presencePanelOpen = ref(false)
 // Participants (excluding self) currently on a given layer, for the tiny
 // avatar badges shown on each layer thumbnail.
 function layerParticipants(layerId) {
-  return participants.value.filter(p => p.activeLayerId === layerId)
+  return participants.value.filter(p => p.activeLayerId === layerId && p.identity?.name !== myIdentity.name)
 }
+
+// Whoever else is on the SAME layer the local user currently has active —
+// drives a heads-up banner near the canvas, since two people drawing on one
+// layer overwrite each other's work (whole-layer last-write-wins, no
+// pixel-level merge) and the layer panel with its thumbnail badges may not
+// even be open while actively drawing.
+const activeLayerCollaborators = computed(() => layerParticipants(activeLayerId.value))
 
 const copiedKey       = ref('')
 const startupErrorMsg = ref('')
@@ -2628,7 +2638,6 @@ function onPointerMove(e) {
 let _pendingRemoteUpdates = []
 
 function queueOrApplyRemoteUpdate(payload) {
-  console.log(`[sync] queueOrApplyRemoteUpdate: drawing=${drawing} -> ${drawing ? 'QUEUE' : 'APPLY NOW'}`, (payload.layers||[]).map(l=>l.id))
   if (drawing) _pendingRemoteUpdates.push(payload)
   else lc.applyRemoteLayers(payload)
 }
@@ -2637,7 +2646,6 @@ async function flushPendingRemoteUpdates() {
   if (!_pendingRemoteUpdates.length) return
   const queue = _pendingRemoteUpdates
   _pendingRemoteUpdates = []
-  console.log(`[sync] flushPendingRemoteUpdates: applying ${queue.length} queued update(s)`)
   // Sequential, not parallel: overlapping calls would race on the shared
   // _applyingRemote flag (one call's `finally` resetting it while another
   // is still mid-merge) and on layers.value itself.
@@ -3383,6 +3391,18 @@ onUnmounted(() => {
   flex-shrink: 0;
   gap: 0;
   user-select: none;
+}
+
+.layer-conflict-warning {
+  margin-left: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40vw;
 }
 
 

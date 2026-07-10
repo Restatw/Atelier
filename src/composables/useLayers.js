@@ -1,7 +1,7 @@
 import { ref, computed, reactive, nextTick, watch } from 'vue'
 import { dbGet, dbPut, dbDelMany } from '../db.js'
 import { t } from '../i18n.js'
-import { pushCanvasUpdate, pushActiveLayer, myIdentity } from '../collabSync.js'
+import { pushCanvasUpdate, pushActiveLayer } from '../collabSync.js'
 import { isSyncActive } from '../widgetContext.js'
 
 export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
@@ -137,11 +137,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   // once a peer's unrelated update comes in. Keep this split from
   // applyRemoteLayers, which calls persistLocalOnly() directly instead.
   function pushChangesToSync(dataURLs) {
-    if (!isSyncActive) return
-    if (_applyingRemote) {
-      console.log(`[sync:${myIdentity.name}] pushChangesToSync SKIPPED — a remote merge is still in flight (_applyingRemote=true)`)
-      return
-    }
+    if (!isSyncActive || _applyingRemote) return
     const currentIds = new Set(layers.value.map(l => l.id))
     const removedLayerIds = Array.from(_lastSynced.keys()).filter(id => !currentIds.has(id))
     const changed = layers.value
@@ -151,8 +147,6 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
         id: l.id, name: l.name, visible: l.visible, opacity: l.opacity,
         dataURL, rev: Date.now(),
       }))
-
-    console.log(`[sync:${myIdentity.name}] pushChangesToSync: layers=${layers.value.map(l=>l.id)} changed=${changed.map(c=>c.id)} removed=${removedLayerIds}`)
 
     if (changed.length || removedLayerIds.length) {
       pushCanvasUpdate({
@@ -183,12 +177,10 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   async function applyRemoteLayers(payload) {
     if (!payload || !canvasRef.value) return
     _applyingRemote = true
-    console.log(`[sync:${myIdentity.name}] applyRemoteLayers START — before=${layers.value.map(l=>l.id)} incoming=${(payload.layers||[]).map(l=>l.id)} order=${payload.layerOrder} localCanvas=${canvasLogicalW.value}x${canvasLogicalH.value} incomingCanvas=${payload.canvasW}x${payload.canvasH}`)
     try {
       const w = payload.canvasW || canvasLogicalW.value
       const h = payload.canvasH || canvasLogicalH.value
       if (w !== canvasLogicalW.value || h !== canvasLogicalH.value) {
-        console.log(`[sync:${myIdentity.name}] applyRemoteLayers: canvas size mismatch, resizing all layers ${canvasLogicalW.value}x${canvasLogicalH.value} -> ${w}x${h}`)
         canvasLogicalW.value   = w
         canvasLogicalH.value   = h
         canvasRef.value.width  = w
@@ -277,8 +269,6 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
       if (!ordered.find(l => l.id === activeLayerId.value))
         activeLayerId.value = ordered.at(-1)?.id ?? null
 
-      console.log(`[sync:${myIdentity.name}] applyRemoteLayers MERGED — after=${layers.value.map(l=>l.id)}`)
-
       composite()
       const dataURLs = await persistLocalOnly()
 
@@ -310,7 +300,6 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
         }
       }
       for (const id of payload.removedLayerIds || []) _lastSynced.delete(id)
-      console.log(`[sync:${myIdentity.name}] applyRemoteLayers DONE`)
     } finally {
       _applyingRemote = false
     }

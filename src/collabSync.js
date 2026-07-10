@@ -25,48 +25,20 @@ export function initCollabSync({ onRemoteUpdate } = {}) {
 
   socket.on('connect', () => {
     syncConnected.value = true
-    console.log(`[sync:${myIdentity.name}] connected, joining room`, syncRoomId)
     socket.emit('join', { roomId: syncRoomId, identity: myIdentity })
   })
 
-  socket.on('disconnect', () => {
-    syncConnected.value = false
-    console.log(`[sync:${myIdentity.name}] disconnected`)
-  })
+  socket.on('disconnect', () => { syncConnected.value = false })
 
   socket.on('presence', (p) => { participants.value = p.participants || [] })
 
-  socket.on('sync-state', (payload) => {
-    console.log(`[sync:${myIdentity.name}] RECV sync-state`, {
-      canvasW: payload.canvasW, canvasH: payload.canvasH,
-      layerOrder: payload.layerOrder,
-      layers: (payload.layers || []).map(l => ({ id: l.id, rev: l.rev, len: l.dataURL?.length })),
-    })
-    remoteUpdateHandler?.(payload)
-  })
-  socket.on('canvas-update', (payload) => {
-    console.log(`[sync:${myIdentity.name}] RECV canvas-update`, {
-      canvasW: payload.canvasW, canvasH: payload.canvasH,
-      layerOrder: payload.layerOrder,
-      layers: (payload.layers || []).map(l => ({ id: l.id, rev: l.rev, len: l.dataURL?.length })),
-      removedLayerIds: payload.removedLayerIds,
-    })
-    remoteUpdateHandler?.(payload)
-  })
+  socket.on('sync-state', (payload) => { remoteUpdateHandler?.(payload) })
+  socket.on('canvas-update', (payload) => { remoteUpdateHandler?.(payload) })
 }
 
 // Pushes changed layers out to peers. No-op when sync isn't active.
 export function pushCanvasUpdate(payload) {
-  if (!socket || !syncConnected.value) {
-    console.log(`[sync:${myIdentity.name}] SKIP push (not connected)`, payload)
-    return
-  }
-  console.log(`[sync:${myIdentity.name}] SEND canvas-update`, {
-    canvasW: payload.canvasW, canvasH: payload.canvasH,
-    layerOrder: payload.layerOrder,
-    layers: (payload.layers || []).map(l => ({ id: l.id, rev: l.rev, len: l.dataURL?.length })),
-    removedLayerIds: payload.removedLayerIds,
-  })
+  if (!socket || !syncConnected.value) return
   socket.emit('canvas-update', payload)
 }
 
