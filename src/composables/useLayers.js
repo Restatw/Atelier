@@ -186,7 +186,23 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
         canvasRef.value.width  = w
         canvasRef.value.height = h
         canvasSize.value = { w, h }
-        for (const layer of layers.value) { layer.canvas.width = w; layer.canvas.height = h }
+        // Assigning canvas.width/height clears the bitmap even when only
+        // one dimension actually changes. If this client's local canvas
+        // size had drifted from the sender's (e.g. stale size persisted
+        // from an earlier local session), every layer would be wiped here
+        // — including ones this payload never mentions and so never
+        // redraws — silently blanking otherwise-untouched layers. Preserve
+        // each layer's existing pixels across the resize.
+        for (const layer of layers.value) {
+          const c = layer.canvas
+          let snapshot = null
+          if (c.width && c.height) {
+            try { snapshot = c.getContext('2d').getImageData(0, 0, c.width, c.height) } catch { /* ignore */ }
+          }
+          c.width = w
+          c.height = h
+          if (snapshot) c.getContext('2d').putImageData(snapshot, 0, 0)
+        }
       }
 
       const byId = new Map(layers.value.map(l => [l.id, l]))
