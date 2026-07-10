@@ -280,17 +280,32 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
       console.log(`[sync:${myIdentity.name}] applyRemoteLayers MERGED — after=${layers.value.map(l=>l.id)}`)
 
       composite()
-      await persistLocalOnly()
+      const dataURLs = await persistLocalOnly()
 
       // Only the layers we just received are now known-synced. Anything
       // else in local state (e.g. a stroke the local user just finished
       // but whose own debounced persistToStorage() hasn't run yet) must be
       // left untouched here — see pushChangesToSync() above for why.
+      //
+      // Stamp using THIS canvas's own freshly re-encoded output (from
+      // persistLocalOnly's toDataURL() pass), not the sender's raw dataURL
+      // string. Decoding a PNG and redrawing it via drawImage(), then
+      // re-encoding, isn't guaranteed to produce byte-identical output even
+      // for pixel-identical content (alpha-blend rounding on semi-
+      // transparent brush strokes is enough to shift it) — so comparing a
+      // future local toDataURL() against the sender's original string would
+      // make pushChangesToSync() see a false "change" on content that never
+      // actually changed locally, and immediately re-push it. Both peers
+      // doing that at once is an unbounded echo loop, and whichever stale
+      // echo happens to land last can overwrite a real concurrent edit
+      // despite carrying no new content (see the SEND/RECV ping-pong in the
+      // debug log this was diagnosed from).
       for (const incoming of payload.layers || []) {
-        const l = layers.value.find(x => x.id === incoming.id)
-        if (l) {
+        const idx = layers.value.findIndex(x => x.id === incoming.id)
+        if (idx !== -1) {
+          const l = layers.value[idx]
           _lastSynced.set(incoming.id, {
-            name: l.name, visible: l.visible, opacity: l.opacity, dataURL: incoming.dataURL,
+            name: l.name, visible: l.visible, opacity: l.opacity, dataURL: dataURLs[idx],
           })
         }
       }
