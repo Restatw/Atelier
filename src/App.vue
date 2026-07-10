@@ -2628,6 +2628,7 @@ function onPointerMove(e) {
 let _pendingRemoteUpdates = []
 
 function queueOrApplyRemoteUpdate(payload) {
+  console.log(`[sync] queueOrApplyRemoteUpdate: drawing=${drawing} -> ${drawing ? 'QUEUE' : 'APPLY NOW'}`, (payload.layers||[]).map(l=>l.id))
   if (drawing) _pendingRemoteUpdates.push(payload)
   else lc.applyRemoteLayers(payload)
 }
@@ -2636,6 +2637,7 @@ async function flushPendingRemoteUpdates() {
   if (!_pendingRemoteUpdates.length) return
   const queue = _pendingRemoteUpdates
   _pendingRemoteUpdates = []
+  console.log(`[sync] flushPendingRemoteUpdates: applying ${queue.length} queued update(s)`)
   // Sequential, not parallel: overlapping calls would race on the shared
   // _applyingRemote flag (one call's `finally` resetting it while another
   // is still mid-merge) and on layers.value itself.
