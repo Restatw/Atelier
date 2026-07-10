@@ -581,9 +581,10 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   function resetToBlank() {
     const w = canvasLogicalW.value, h = canvasLogicalH.value
     layerIdSeq = 0
-    const bg    = makeLayer(t('layerBg'), w, h)
-    const bgCtx = bg.canvas.getContext('2d')
-    bgCtx.fillStyle = '#ffffff'; bgCtx.fillRect(0, 0, w, h)
+    // Transparent, like every layer addLayer() creates — a new project's
+    // first layer used to be baked-in opaque white, which was the one case
+    // where a "new layer" wasn't actually blank.
+    const bg = makeLayer(t('layerBg'), w, h)
     canvasRef.value.width  = w; canvasRef.value.height = h
     layers.value = [bg]
     activeLayerId.value = bg.id
