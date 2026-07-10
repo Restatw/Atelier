@@ -4,9 +4,6 @@
       <span>{{ toolLabel }}</span>
       <span v-if="cursorPos"> | {{ cursorPos.x }}, {{ cursorPos.y }}</span>
       <span v-if="activeLayer"> | {{ activeLayer.name }}</span>
-      <span v-if="activeLayerCollaborators.length" class="layer-conflict-warning" :title="t('layerConflictPrefix') + ' ' + activeLayerCollaborators.map(id => id?.name).join(', ')">
-        ⚠️ {{ t('layerConflictPrefix') }} {{ activeLayerCollaborators.map(id => `${id?.emoji || ''} ${id?.name || ''}`).join(', ') }}
-      </span>
       <span style="margin-left:auto;padding-right: 8px;">{{ canvasSize.w }} × {{ canvasSize.h }}  |  {{ t('layerCountPrefix') }}{{ layers.length }} {{ t('layerCountUnit') }}  |  {{ Math.round(viewZoom * 100) }}%</span>
     </div>
     <!-- ── Canvas + toolbar ───────────────────────────── -->
@@ -867,10 +864,11 @@ ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '["Authorization
         <div v-if="!presencePanelOpen" @click="presencePanelOpen = true"
           style="display:flex;align-items:center;cursor:pointer;pointer-events:auto">
           <span v-for="(p, i) in participants.slice(0, 5)" :key="p.socketId"
+            :title="isEditingMyLayer(p) ? t('layerConflictPrefix') : undefined"
             :style="{
               background: p.identity?.color || '#888', borderRadius: '50%',
               width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '12px', border: '1.5px solid #111',
+              fontSize: '12px', border: isEditingMyLayer(p) ? '2px solid #eab308' : '1.5px solid #111',
               marginLeft: i > 0 ? '-8px' : '0', zIndex: 10 - i,
             }">{{ p.identity?.emoji }}</span>
           <span v-if="participants.length > 5"
@@ -891,7 +889,12 @@ ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '["Authorization
               padding: '3px 10px 3px 4px', fontSize: '11px', color: '#fff',
               border: p.identity?.name === myIdentity.name ? '1px solid rgba(255,255,255,0.6)' : '1px solid transparent',
             }">
-            <span :style="{ background: p.identity?.color || '#888', borderRadius: '50%', width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px' }">
+            <span :title="isEditingMyLayer(p) ? t('layerConflictPrefix') : undefined"
+              :style="{
+                background: p.identity?.color || '#888', borderRadius: '50%',
+                width: '18px', height: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '11px', border: isEditingMyLayer(p) ? '2px solid #eab308' : '2px solid transparent',
+              }">
               {{ p.identity?.emoji }}
             </span>
             <span>{{ p.identity?.name }}{{ p.identity?.name === myIdentity.name ? ` (${t('collabYou')})` : '' }}</span>
@@ -1169,6 +1172,13 @@ const activeLayerCollaborators = computed(() => {
   }
   return Array.from(latestByName.values()).map(e => e.identity)
 })
+
+// Drives the amber avatar-border highlight in the presence panel, instead
+// of a separate banner — a participant who's recently edited the layer the
+// local user has active right now.
+function isEditingMyLayer(p) {
+  return activeLayerCollaborators.value.some(id => id?.name === p.identity?.name)
+}
 
 const copiedKey       = ref('')
 const startupErrorMsg = ref('')
@@ -3410,18 +3420,6 @@ onUnmounted(() => {
   flex-shrink: 0;
   gap: 0;
   user-select: none;
-}
-
-.layer-conflict-warning {
-  margin-left: 10px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(234, 179, 8, 0.15);
-  color: #eab308;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 40vw;
 }
 
 
