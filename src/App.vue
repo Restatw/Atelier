@@ -2362,6 +2362,8 @@ function newProject() {
 let drawing       = false
 let startX        = 0
 let startY        = 0
+let lastX         = 0  // previous point of an in-progress freehand stroke
+let lastY         = 0
 let layerSnapshot = null
 let drawingButton = 0
 let strokeCanvas  = null  // temp canvas for masked pen/brush/eraser strokes
@@ -2535,6 +2537,7 @@ function onPointerDown(e) {
   const ctx = getActiveCtx()
   const { width: lw, height: lh } = activeLayer.value.canvas
   layerSnapshot = ctx.getImageData(0, 0, lw, lh)
+  lastX = p.x; lastY = p.y
 
   const masked = selActive.value && (selRect.value || selMaskCanvas)
   const isFreehand = currentTool.value === 'pen' || currentTool.value === 'brush' || currentTool.value === 'eraser'
@@ -2607,7 +2610,8 @@ function onPointerMove(e) {
   // ── 遮罩 + 自由筆跡（pen/brush/eraser）：strokeCanvas 模式 ──────────
   if (strokeCanvas && masked) {
     const sctx = strokeCanvas.getContext('2d')
-    sctx.lineTo(p.x, p.y); sctx.stroke()
+    sctx.beginPath(); sctx.moveTo(lastX, lastY); sctx.lineTo(p.x, p.y); sctx.stroke()
+    lastX = p.x; lastY = p.y
 
     // 把 strokeCanvas 套上 mask，只保留選取區內的像素
     const tmp = mkCanvas(lw, lh)
@@ -2634,18 +2638,21 @@ function onPointerMove(e) {
   applyStyle(ctx)
 
   if (currentTool.value === 'pen') {
-    ctx.lineTo(p.x, p.y); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke()
+    lastX = p.x; lastY = p.y
     composite()
   } else if (currentTool.value === 'brush') {
     ctx.lineWidth   = lineWidth.value * 3
     ctx.globalAlpha = (strokeOpacity.value / 100) * 0.4
-    ctx.lineTo(p.x, p.y); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke()
+    lastX = p.x; lastY = p.y
     composite()
   } else if (currentTool.value === 'eraser') {
     ctx.globalCompositeOperation = 'destination-out'
     ctx.globalAlpha = 1; ctx.lineWidth = lineWidth.value * 3
     ctx.lineCap = 'round'; ctx.lineJoin = 'round'
-    ctx.lineTo(p.x, p.y); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke()
+    lastX = p.x; lastY = p.y
     ctx.globalCompositeOperation = 'source-over'; composite()
   } else if (layerSnapshot) {
     ctx.putImageData(layerSnapshot, 0, 0)
