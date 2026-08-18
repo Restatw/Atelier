@@ -2362,8 +2362,7 @@ function newProject() {
 let drawing       = false
 let startX        = 0
 let startY        = 0
-let lastX         = 0  // previous point of an in-progress freehand stroke
-let lastY         = 0
+let strokePoints  = []  // accumulated points of an in-progress freehand stroke
 let layerSnapshot = null
 let drawingButton = 0
 let strokeCanvas  = null  // temp canvas for masked pen/brush/eraser strokes
@@ -2537,40 +2536,16 @@ function onPointerDown(e) {
   const ctx = getActiveCtx()
   const { width: lw, height: lh } = activeLayer.value.canvas
   layerSnapshot = ctx.getImageData(0, 0, lw, lh)
-  lastX = p.x; lastY = p.y
 
   const masked = selActive.value && (selRect.value || selMaskCanvas)
   const isFreehand = currentTool.value === 'pen' || currentTool.value === 'brush' || currentTool.value === 'eraser'
+
+  if (isFreehand) strokePoints = [{ x: p.x, y: p.y }]
 
   if (masked && isFreehand) {
     // 遮罩模式：在 strokeCanvas 上累積筆跡，避免 clip() 破壞路徑
     maskCache    = getEffectiveMask()
     strokeCanvas = mkCanvas(lw, lh)
-    const sctx   = strokeCanvas.getContext('2d')
-    if (currentTool.value === 'eraser') {
-      // 橡皮擦：在 strokeCanvas 畫不透明白色標記，最後用 destination-out 套用
-      sctx.strokeStyle = '#ffffff'; sctx.fillStyle = '#ffffff'
-      sctx.lineWidth = lineWidth.value * 3; sctx.lineCap = 'round'; sctx.lineJoin = 'round'
-    } else {
-      applyStyle(sctx)
-      if (currentTool.value === 'brush') {
-        sctx.lineWidth   = lineWidth.value * 3
-        sctx.globalAlpha = (strokeOpacity.value / 100) * 0.4
-      }
-    }
-    sctx.beginPath(); sctx.moveTo(p.x, p.y)
-  } else {
-    applyStyle(ctx)
-    if (currentTool.value === 'pen' || currentTool.value === 'brush') {
-      if (currentTool.value === 'brush') {
-        ctx.lineWidth   = lineWidth.value * 3
-        ctx.globalAlpha = (strokeOpacity.value / 100) * 0.4
-      }
-      ctx.beginPath(); ctx.moveTo(p.x, p.y)
-    }
-    if (currentTool.value === 'eraser') {
-      ctx.beginPath(); ctx.moveTo(p.x, p.y)
-    }
   }
 }
 
@@ -2609,9 +2584,25 @@ function onPointerMove(e) {
 
   // ── 遮罩 + 自由筆跡（pen/brush/eraser）：strokeCanvas 模式 ──────────
   if (strokeCanvas && masked) {
+    strokePoints.push({ x: p.x, y: p.y })
     const sctx = strokeCanvas.getContext('2d')
-    sctx.beginPath(); sctx.moveTo(lastX, lastY); sctx.lineTo(p.x, p.y); sctx.stroke()
-    lastX = p.x; lastY = p.y
+    sctx.clearRect(0, 0, lw, lh)
+    if (currentTool.value === 'eraser') {
+      // 橡皮擦：在 strokeCanvas 畫不透明白色標記，最後用 destination-out 套用
+      sctx.strokeStyle = '#ffffff'; sctx.fillStyle = '#ffffff'
+      sctx.lineWidth = lineWidth.value * 3; sctx.lineCap = 'round'; sctx.lineJoin = 'round'
+    } else {
+      applyStyle(sctx)
+      if (currentTool.value === 'brush') {
+        sctx.lineWidth   = lineWidth.value * 3
+        sctx.globalAlpha = (strokeOpacity.value / 100) * 0.4
+      }
+    }
+    // 每次都從頭重畫完整路徑（單一 stroke 呼叫），避免逐段疊加造成接點變深或出現圓點
+    sctx.beginPath()
+    sctx.moveTo(strokePoints[0].x, strokePoints[0].y)
+    for (let i = 1; i < strokePoints.length; i++) sctx.lineTo(strokePoints[i].x, strokePoints[i].y)
+    sctx.stroke()
 
     // 把 strokeCanvas 套上 mask，只保留選取區內的像素
     const tmp = mkCanvas(lw, lh)
@@ -2635,25 +2626,25 @@ function onPointerMove(e) {
     return
   }
 
-  applyStyle(ctx)
-
-  if (currentTool.value === 'pen') {
-    ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke()
-    lastX = p.x; lastY = p.y
+  if (currentTool.value === 'pen' || currentTool.value === 'brush' || currentTool.value === 'eraser') {
+    strokePoints.push({ x: p.x, y: p.y })
+    // 每次都從乾淨的 snapshot 重畫完整路徑（單一 stroke 呼叫），
+    // 避免逐段疊加造成接點透明度加深或出現圓點
+    ctx.putImageData(layerSnapshot, 0, 0)
+    applyStyle(ctx)
+    if (currentTool.value === 'brush') {
+      ctx.lineWidth   = lineWidth.value * 3
+      ctx.globalAlpha = (strokeOpacity.value / 100) * 0.4
+    } else if (currentTool.value === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out'
+      ctx.globalAlpha = 1; ctx.lineWidth = lineWidth.value * 3
+    }
+    ctx.beginPath()
+    ctx.moveTo(strokePoints[0].x, strokePoints[0].y)
+    for (let i = 1; i < strokePoints.length; i++) ctx.lineTo(strokePoints[i].x, strokePoints[i].y)
+    ctx.stroke()
+    if (currentTool.value === 'eraser') ctx.globalCompositeOperation = 'source-over'
     composite()
-  } else if (currentTool.value === 'brush') {
-    ctx.lineWidth   = lineWidth.value * 3
-    ctx.globalAlpha = (strokeOpacity.value / 100) * 0.4
-    ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke()
-    lastX = p.x; lastY = p.y
-    composite()
-  } else if (currentTool.value === 'eraser') {
-    ctx.globalCompositeOperation = 'destination-out'
-    ctx.globalAlpha = 1; ctx.lineWidth = lineWidth.value * 3
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round'
-    ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke()
-    lastX = p.x; lastY = p.y
-    ctx.globalCompositeOperation = 'source-over'; composite()
   } else if (layerSnapshot) {
     ctx.putImageData(layerSnapshot, 0, 0)
     applyStyle(ctx)
@@ -2716,7 +2707,7 @@ function _onPointerUpInner() {
   if (!drawing) return
   drawing = false
   layerSnapshot = null
-  strokeCanvas = null; maskCache = null
+  strokeCanvas = null; maskCache = null; strokePoints = []
   const ctx = getActiveCtx()
   if (ctx) {
     ctx.closePath()
