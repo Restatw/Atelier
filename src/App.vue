@@ -922,7 +922,7 @@ import {
   Plus, Copy, ArrowDownToLine, X, Pen, ArrowLeftRight, Minimize2,
   ZoomIn, ZoomOut, Settings, Upload, Folder, CloudUpload,
   SquareDashedMousePointer, LassoSelect, PenLine, Paintbrush, Move, Wand2,
-  Type, Bold, Italic
+  Type, Bold, Italic, Blend
 } from 'lucide-vue-next'
 import { useIpfsBackup } from './composables/useIpfsBackup.js'
 import { isWidget, isSyncActive, isCollabSession, generateCollabSessionId } from './widgetContext.js'
@@ -937,6 +937,7 @@ const paintStore = usePaintStore()
 const tools = [
   { id: 'pen',          comp: Pencil,                   labelKey: 'tool_pen',          key: 'P' },
   { id: 'brush',        comp: Brush,                    labelKey: 'tool_brush',        key: 'B' },
+  { id: 'mix',          comp: Blend,                    labelKey: 'tool_mix',          key: 'M' },
   { id: 'line',         comp: Minus,                    labelKey: 'tool_line',         key: 'L' },
   { id: 'rect',         comp: Square,                   labelKey: 'tool_rect',         key: 'R' },
   { id: 'circle',       comp: Circle,                   labelKey: 'tool_circle',       key: 'C' },
@@ -1516,7 +1517,7 @@ watch(currentTool, (newTool, oldTool) => {
   if (oldTool === 'text' && newTool !== 'text') commitText()
 
   // 切換到繪圖工具時若 float 懸浮（移動模式），先 commit
-  const drawingTools = ['pen', 'brush', 'eraser', 'line', 'rect', 'circle', 'fill']
+  const drawingTools = ['pen', 'brush', 'mix', 'eraser', 'line', 'rect', 'circle', 'fill']
   if (drawingTools.includes(newTool) && selFloat && !selDrawMode.value) commitFloat()
 
   const enteringSelPaint = newTool === 'sel_pen' || newTool === 'sel_eras'
@@ -2368,6 +2369,111 @@ let drawingButton = 0
 let strokeCanvas  = null  // temp canvas for masked pen/brush/eraser strokes
 let maskCache     = null  // effective mask canvas cached per stroke
 
+// ── Mix (smudge) tool state ────────────────────────────────
+let mixBuf      = null  // "carried" paint sampled under the brush, updated as the stroke moves
+let mixR        = 0     // sample radius (px) for the current stroke
+let mixLast     = null  // last stamped point, for interpolating spacing along the path
+let mixMaskCache = null // effective selection mask, cached per stroke
+let _mixMaskCanvas = null, _mixMaskRadius = -1  // cached soft circular falloff mask, keyed by radius
+
+function mixRadius() {
+  return Math.max(3, Math.round(lineWidth.value * 1.5))
+}
+
+// Soft round falloff mask (opaque centre → transparent edge), reused while the radius is unchanged
+function getMixFalloffMask(r) {
+  if (_mixMaskCanvas && _mixMaskRadius === r) return _mixMaskCanvas
+  const c = mkCanvas(r * 2, r * 2)
+  const g = c.getContext('2d')
+  const grad = g.createRadialGradient(r, r, 0, r, r, r)
+  grad.addColorStop(0,   'rgba(255,255,255,1)')
+  grad.addColorStop(0.6, 'rgba(255,255,255,1)')
+  grad.addColorStop(1,   'rgba(255,255,255,0)')
+  g.fillStyle = grad
+  g.beginPath(); g.arc(r, r, r, 0, Math.PI * 2); g.fill()
+  _mixMaskCanvas = c; _mixMaskRadius = r
+  return c
+}
+
+function sampleCanvasRegion(srcCanvas, cx, cy, r) {
+  const buf = mkCanvas(r * 2, r * 2)
+  buf.getContext('2d').drawImage(srcCanvas, cx - r, cy - r, r * 2, r * 2, 0, 0, r * 2, r * 2)
+  return buf
+}
+
+function handleMixDown(p) {
+  const ctx = getActiveCtx()
+  if (!ctx) return
+  mixR = mixRadius()
+  mixBuf  = sampleCanvasRegion(ctx.canvas, p.x, p.y, mixR)
+  mixLast = { x: p.x, y: p.y }
+  mixMaskCache = (selActive.value && (selRect.value || selMaskCanvas)) ? getEffectiveMask() : null
+}
+
+const MIX_PICKUP_RATE = 0.35  // how fast the carried paint drifts toward newly-touched pixels, independent of opacity
+
+function stampMixAt(ctx, q) {
+  const r = mixR
+  // Cap the per-dab alpha well under 1 so a single overlapping dab never fully
+  // overwrites the destination — otherwise a wide brush painting ahead of itself
+  // at full opacity would erase the very colours later steps need to pick up,
+  // degenerating into a hard clone-stamp instead of a blend.
+  const strength = (strokeOpacity.value / 100) * 0.5
+  if (strength <= 0) return
+
+  // Sample what's actually under the brush *before* painting, so the pickup
+  // below reflects the untouched destination rather than what we just laid down
+  // (sampling after painting would make the carried buffer a copy of itself
+  // every step, freezing it at the very first colour picked up).
+  const freshBefore = sampleCanvasRegion(ctx.canvas, q.x, q.y, r)
+
+  // Carried paint, clipped to a soft round falloff
+  const stamp = mkCanvas(r * 2, r * 2)
+  const sctx = stamp.getContext('2d')
+  sctx.drawImage(mixBuf, 0, 0)
+  sctx.globalCompositeOperation = 'destination-in'
+  sctx.drawImage(getMixFalloffMask(r), 0, 0)
+  sctx.globalCompositeOperation = 'source-over'
+
+  // Further clip by the active selection, if any
+  if (mixMaskCache) {
+    const selCrop = sampleCanvasRegion(mixMaskCache, q.x, q.y, r)
+    sctx.globalCompositeOperation = 'destination-in'
+    sctx.drawImage(selCrop, 0, 0)
+    sctx.globalCompositeOperation = 'source-over'
+  }
+
+  ctx.save()
+  ctx.globalAlpha = strength
+  ctx.drawImage(stamp, q.x - r, q.y - r)
+  ctx.restore()
+
+  // Drift the carried paint toward the colours it just passed over
+  const mbCtx = mixBuf.getContext('2d')
+  mbCtx.save()
+  mbCtx.globalAlpha = MIX_PICKUP_RATE
+  mbCtx.drawImage(freshBefore, 0, 0)
+  mbCtx.restore()
+}
+
+function handleMixMove(p) {
+  const ctx = getActiveCtx()
+  if (!ctx || !mixBuf) return
+  const spacing = Math.max(2, mixR / 4)
+  const dx = p.x - mixLast.x, dy = p.y - mixLast.y
+  const dist = Math.hypot(dx, dy)
+  const steps = Math.max(1, Math.round(dist / spacing))
+  for (let i = 1; i <= steps; i++) {
+    stampMixAt(ctx, { x: mixLast.x + dx * i / steps, y: mixLast.y + dy * i / steps })
+  }
+  mixLast = { x: p.x, y: p.y }
+  composite()
+}
+
+function handleMixUp() {
+  mixBuf = null; mixLast = null; mixMaskCache = null
+}
+
 function activeDrawColor() {
   return drawingButton === 2 ? fillColor.value : currentColor.value
 }
@@ -2531,6 +2637,7 @@ function onPointerDown(e) {
     pickColor(p.x, p.y)
     return
   }
+  if (currentTool.value === 'mix') { drawing = true; handleMixDown(p); return }
 
   drawing = true
   const ctx = getActiveCtx()
@@ -2575,6 +2682,7 @@ function onPointerMove(e) {
   if (drawing && currentTool.value === 'lasso')    { handleLassoMove(p);   return }
   if (drawing && currentTool.value === 'sel_pen')  { handleSelPenMove(p);  return }
   if (drawing && currentTool.value === 'sel_eras') { handleSelErasMove(p); return }
+  if (drawing && currentTool.value === 'mix')      { handleMixMove(p);     return }
 
   if (!drawing || !activeLayer.value) return
 
@@ -2703,6 +2811,7 @@ function _onPointerUpInner() {
   if (currentTool.value === 'lasso'    && drawing)    { drawing = false; handleLassoUp();   return }
   if (currentTool.value === 'sel_pen'  && drawing)    { drawing = false; handleSelPenUp();  return }
   if (currentTool.value === 'sel_eras' && drawing)    { drawing = false; handleSelErasUp(); return }
+  if (currentTool.value === 'mix'      && drawing)    { drawing = false; handleMixUp(); composite(); saveHistory(); return }
 
   if (!drawing) return
   drawing = false
@@ -2740,7 +2849,7 @@ function onTouchMove(e)  {
 function onTouchEnd() { onPointerUp() }
 
 // ── Keyboard ──────────────────────────────────────────────
-const keyMap = { p:'pen', b:'brush', l:'line', r:'rect', c:'circle', f:'fill', i:'eyedropper', e:'eraser', h:'pan', v:'move', s:'select_rect', q:'lasso', w:'sel_pen', g:'magic_wand', t:'text' }
+const keyMap = { p:'pen', b:'brush', m:'mix', l:'line', r:'rect', c:'circle', f:'fill', i:'eyedropper', e:'eraser', h:'pan', v:'move', s:'select_rect', q:'lasso', w:'sel_pen', g:'magic_wand', t:'text' }
 
 function onKey(e) {
   // Block all shortcuts while text tool is active or text box is open

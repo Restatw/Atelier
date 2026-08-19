@@ -18,6 +18,7 @@ const messages = {
     tool_fill:       'Fill Bucket',
     tool_eyedropper: 'Eyedropper',
     tool_eraser:     'Eraser',
+    tool_mix:        'Mix',
     // Layer panel
     layers:          'Layers',
     addLayer:        'Add Layer',
@@ -184,6 +185,7 @@ const messages = {
     tool_fill:       '填色桶',
     tool_eyedropper: '取色器',
     tool_eraser:     '橡皮擦',
+    tool_mix:        '混色筆',
     // Layer panel
     layers:          '圖層',
     addLayer:        '新增圖層',
