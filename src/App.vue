@@ -2467,14 +2467,28 @@ function handleMixDown(p) {
 
 const MIX_PICKUP_RATE = 0.35  // how fast the carried paint drifts toward newly-touched pixels, independent of opacity
 
+// handleMixMove spaces dabs at mixR/4, so a straight drag re-stamps any
+// given pixel near the stroke's centreline about 2r / (r/4) = 8 times.
+const MIX_DAB_OVERLAP = 8
+
 function stampMixAt(ctx, q) {
   const r = mixR
   // Cap the per-dab alpha well under 1 so a single overlapping dab never fully
   // overwrites the destination — otherwise a wide brush painting ahead of itself
   // at full opacity would erase the very colours later steps need to pick up,
   // degenerating into a hard clone-stamp instead of a blend.
-  const strength = (strokeOpacity.value / 100) * 0.5
-  if (strength <= 0) return
+  //
+  // That cap has to account for MIX_DAB_OVERLAP, though: source-over alpha
+  // compounds across overlapping dabs (after n dabs at alpha a, coverage is
+  // 1 - (1-a)^n), so stamping at the "intended" strength on every one of
+  // ~8 overlapping dabs would compound to near-total opacity regardless of
+  // how low that strength looks on its own — the mixed colour comes out far
+  // darker/more saturated, over a much wider swath, than the strength
+  // slider implies. Solve for the per-dab alpha that compounds back to the
+  // intended strength instead of applying it directly.
+  const desiredStrength = (strokeOpacity.value / 100) * 0.5
+  if (desiredStrength <= 0) return
+  const strength = 1 - Math.pow(1 - desiredStrength, 1 / MIX_DAB_OVERLAP)
 
   // Sample what's actually under the brush *before* painting, so the pickup
   // below reflects the untouched destination rather than what we just laid down
