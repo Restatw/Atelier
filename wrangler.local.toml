@@ -1,0 +1,16 @@
+# Local-only config for previewing the sync Durable Object in the dev
+# environment (docker-compose.dev.yml's atelier-dev-sync service). Only
+# ever used with `wrangler dev` (which fully emulates Durable Objects
+# locally via workerd) — never deploy this file to Cloudflare. The
+# production Worker config lives in wrangler.toml.
+name = "atelier-dev-sync"
+main = "cloudflare-worker/worker.js"
+compatibility_date = "2024-11-01"
+
+[[durable_objects.bindings]]
+name = "SYNC_ROOM"
+class_name = "SyncRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SyncRoom"]

@@ -44,4 +44,9 @@ export default defineConfig({
     }),
   ],
   base: '/',
+  preview: {
+    // Requests arrive through nginx with Host: atelier-dev.re95.org — Vite's
+    // preview server rejects unrecognised Host headers by default.
+    allowedHosts: ['atelier-dev.re95.org'],
+  },
 })

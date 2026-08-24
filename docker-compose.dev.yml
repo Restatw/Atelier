@@ -1,0 +1,19 @@
+services:
+  atelier-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4173:4173"
+
+  # Local-only Durable Object emulation for /sync — see wrangler.local.toml.
+  # nginx routes atelier-dev.re95.org/sync/* here, everything else to
+  # atelier-dev above.
+  atelier-dev-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile.sync-dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"
