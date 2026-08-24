@@ -19,6 +19,9 @@
  */
 import { DurableObject } from 'cloudflare:workers'
 
+// Keep in sync with MAX_LAYERS in src/composables/useLayers.js.
+const MAX_LAYERS = 50
+
 export class SyncRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env)
@@ -119,8 +122,21 @@ export class SyncRoom extends DurableObject {
       const applied = []
       const rejectedStale = []
       const rejectedForeign = []
+      const rejectedLimit = []
       for (const incoming of msg.layers) {
         const existing = this.layers.get(incoming.id)
+
+        // Layer cap: shared across the whole room (not per person) — a
+        // genuinely new layer id is refused once the room's at MAX_LAYERS,
+        // but updates to an already-existing layer always go through
+        // regardless, since those don't grow the count. Client-side
+        // useLayers.js enforces the same cap for immediate UI feedback;
+        // this is the backstop for a stale or misbehaving client, same
+        // reasoning as the ownership guard below.
+        if (!existing && this.layers.size >= MAX_LAYERS) {
+          rejectedLimit.push(`${incoming.id}(room at ${this.layers.size}/${MAX_LAYERS} layers)`)
+          continue
+        }
 
         // Ownership guard: once a layer has a recorded owner, only that
         // owner's own connection may write to it again — including
@@ -188,6 +204,7 @@ export class SyncRoom extends DurableObject {
       this.log(`canvas-update socket=${socketId} applied=[${applied.map(l => `${l.id}:${l.rev}`).join(',')}]`
         + (rejectedStale.length ? ` rejected_stale=[${rejectedStale.join(';')}]` : '')
         + (rejectedForeign.length ? ` rejected_foreign=[${rejectedForeign.join(';')}]` : '')
+        + (rejectedLimit.length ? ` rejected_limit=[${rejectedLimit.join(';')}]` : '')
         + (removedOk.length ? ` removed=[${removedOk.join(',')}]` : '')
         + ` layerOrder=[${(this.layerOrder || []).join(',')}]`)
 

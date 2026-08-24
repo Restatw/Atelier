@@ -872,6 +872,11 @@ ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '["Authorization
         IPFS Error: {{ startupErrorMsg }}
       </div>
 
+      <!-- Layer limit toast -->
+      <div v-if="layerLimitMsg" class="ipfs-toast" @click="layerLimitMsg = ''">
+        {{ layerLimitMsg }}
+      </div>
+
       <!-- Live collaboration presence: sits on whichever side the toolbar
            ISN'T on, so it never overlaps it. Collapsed to a stack of
            avatars by default; click to expand into the named list. -->
@@ -1098,7 +1103,7 @@ const {
   addLayer, duplicateLayer, deleteActiveLayer,
   toggleVisible, moveUp, moveDown, mergeDown, mergeAll, clearLayer,
   importImageLayer, getThumbnailBlob, exportProject, loadProject, resetToBlank, resizeCanvasTo,
-  isLayerEditable, canToggleLock, toggleLock,
+  isLayerEditable, canToggleLock, toggleLock, layerLimitMsg,
 } = lc
 
 // composite() redraws every layer onto the display canvas — cost scales
@@ -1225,6 +1230,12 @@ function isEditingMyLayer(p) {
 
 const copiedKey       = ref('')
 const startupErrorMsg = ref('')
+
+let _layerLimitMsgTimer = null
+watch(layerLimitMsg, msg => {
+  clearTimeout(_layerLimitMsgTimer)
+  if (msg) _layerLimitMsgTimer = setTimeout(() => { layerLimitMsg.value = '' }, 3000)
+})
 
 async function copyText(text, key) {
   try {

@@ -97,6 +97,7 @@ const messages = {
     layerMerged:       'Merged Layer',
     layerBg:           'Background',
     layerOwnerSuffix:  ' Layer',
+    layerLimitReached: 'Layer limit reached (50) — delete one to add another.',
     // Info bar
     layerCountPrefix:  '',
     layerCountUnit:    'layers',
@@ -268,6 +269,7 @@ const messages = {
     layerMerged:       '合併圖層',
     layerBg:           '背景',
     layerOwnerSuffix:  ' 圖層',
+    layerLimitReached: '圖層已達上限(50 層)——刪除一張才能再新增。',
     // Info bar
     layerCountPrefix:  '共 ',
     layerCountUnit:    '圖層',

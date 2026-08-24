@@ -17,6 +17,15 @@ function freshLayerIdSeq() {
   return Math.floor(Math.random() * 1e9)
 }
 
+// Applies everywhere a new layer can appear, collab included — each layer
+// carries real per-canvas pixel data (potentially several MB), so the cap
+// is as much about keeping memory/sync payload size sane as it is about
+// the UI staying usable. In a collab room this is a shared ceiling across
+// every participant's layers combined, not 50 each; see syncRoom.js for
+// the matching server-side enforcement (a client-side cap alone can't stop
+// a stale or misbehaving peer from pushing the room over it).
+export const MAX_LAYERS = 50
+
 export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   let layerIdSeq = freshLayerIdSeq()
 
@@ -28,6 +37,13 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   const layers         = ref([])
   const activeLayerId  = ref(null)
   const editingId      = ref(null)
+  const layerLimitMsg  = ref('')
+
+  function atLayerLimit() {
+    if (layers.value.length < MAX_LAYERS) return false
+    layerLimitMsg.value = t('layerLimitReached')
+    return true
+  }
   const isPanelOpen    = ref(true)
   const history        = ref([])
   const historyIndex   = ref(-1)
@@ -83,6 +99,11 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   function ensureOwnLayer() {
     if (!isSyncActive) return
     if (layers.value.some(l => l.ownerId === myIdentity.id)) return
+    // Silent, not atLayerLimit() — this runs automatically on join, not
+    // from a click, so a toast here would just be a confusing surprise for
+    // someone who hasn't touched anything yet. A room already at the cap
+    // simply doesn't get a spare layer for the next joiner.
+    if (layers.value.length >= MAX_LAYERS) return
     const w = canvasRef.value?.width || 800
     const h = canvasRef.value?.height || 600
     const layer = makeLayer(myLayerName(), w, h, myIdentity.id)
@@ -455,6 +476,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   }
 
   function addLayer() {
+    if (atLayerLimit()) return
     const w = canvasRef.value?.width || 800
     const h = canvasRef.value?.height || 600
     // In a collab room, number relative to how many layers THIS person
@@ -474,6 +496,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   function duplicateLayer() {
     const src = activeLayer.value
     if (!src) return
+    if (atLayerLimit()) return
     const w = src.canvas.width, h = src.canvas.height
     const layer = makeLayer(src.name + t('layerCopySuffix'), w, h, isSyncActive ? myIdentity.id : null)
     layer.visible = src.visible
@@ -601,6 +624,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   }
 
   function importImageLayer(img, name) {
+    if (atLayerLimit()) return
     const w = canvasLogicalW.value
     const h = canvasLogicalH.value
     const layer = makeLayer(name, w, h, isSyncActive ? myIdentity.id : null)
@@ -799,5 +823,6 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     download, doExport, importImageLayer, getThumbnailBlob, getProjectData, exportProject, loadProject,
     resetToBlank, resizeCanvasTo, init, applyRemoteLayers,
     isLayerEditable, canToggleLock, toggleLock, ensureOwnLayer,
+    layerLimitMsg,
   }
 }
