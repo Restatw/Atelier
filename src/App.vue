@@ -2670,6 +2670,17 @@ let viewDrag = null
 
 function onPointerDown(e) {
   if (e.button !== 0 && e.button !== 2) return
+  // The canvas wrapper only gets mousemove/mouseup while the cursor is over
+  // it — a fast stroke (more likely to outrun the cursor when a heavy
+  // layer stack makes rendering fall behind) can slip past its edge for an
+  // instant, at which point onPointerLeave used to treat that as "done" and
+  // cut the stroke off mid-draw. Track the rest of this drag on window
+  // instead, same pattern as the panel/popup resize handlers elsewhere in
+  // this file, so drawing (or any other drag: pan, select, move, transform,
+  // mix) keeps going anywhere on the page until the button is actually
+  // released.
+  window.addEventListener('mousemove', onPointerMove)
+  window.addEventListener('mouseup', onPointerUp)
   if (currentTool.value === 'pan' || currentTool.value === 'rotate') {
     if (e.button !== 0) return
     if (currentTool.value === 'pan')
@@ -2738,6 +2749,12 @@ function onPointerDown(e) {
 }
 
 function onPointerMove(e) {
+  // While a drag is active this same native event reaches us twice — once
+  // via the wrapper's own @mousemove (bubble phase, cursor still over the
+  // canvas) and again via the window listener added in onPointerDown — so
+  // tag it to only process once.
+  if (e._atelierHandled) return
+  e._atelierHandled = true
   if (viewDrag) {
     if (viewDrag.type === 'pan') {
       viewX.value = viewDrag.svx + e.clientX - viewDrag.sx
@@ -2887,7 +2904,17 @@ async function drainRemoteUpdates() {
   }
 }
 
-function onPointerUp() {
+function onPointerUp(e) {
+  // Same event can reach us via both the wrapper's @mouseup and the window
+  // listener added in onPointerDown — process it once. e is only present
+  // when called as a real event handler (window listener, or the
+  // template's @mouseup); internal callers invoke this with no event.
+  if (e) {
+    if (e._atelierHandled) return
+    e._atelierHandled = true
+  }
+  window.removeEventListener('mousemove', onPointerMove)
+  window.removeEventListener('mouseup', onPointerUp)
   _onPointerUpInner()
   if (!drawing) drainRemoteUpdates()
 }
@@ -2924,10 +2951,10 @@ function _onPointerUpInner() {
 function onPointerLeave() {
   cursorPos.value = null
   selHoverHandle.value = null
-  if (viewDrag) return
-  if (selState.value === 'moving') return  // keep floating until mouseup outside
-  if (selTransformDrag) return             // keep transform until mouseup outside
-  if (drawing) onPointerUp()
+  // Every in-progress drag (drawing included) now keeps tracking via the
+  // window listener attached in onPointerDown, so leaving the canvas
+  // element's bounds is no longer where any of them end — only an actual
+  // mouseup is. Nothing else to do here beyond clearing the hover cursor.
 }
 
 // ── Touch ─────────────────────────────────────────────────
