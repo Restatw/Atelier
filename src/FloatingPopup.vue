@@ -9,6 +9,11 @@ const props = defineProps({
   zIndex:    { type: Number,  default: 9999 },
   width:     { type: Number,  default: null },
   resizable: { type: Boolean, default: false },
+  // Different popups have different minimum content widths (a swatch grid
+  // that overflows its columns below a certain width, for instance) — the
+  // generic default is a reasonable floor for popups that don't care, but
+  // callers with real layout requirements should override it.
+  minWidth:  { type: Number,  default: 180 },
 })
 const emit = defineEmits(['update:open', 'update:width', 'bring-to-front'])
 
@@ -94,7 +99,7 @@ function _onMove(e) {
     pos.x = Math.max(6, Math.min(_dNx + e.clientX - _dOx, window.innerWidth  - pw - 6))
     pos.y = Math.max(6, Math.min(_dNy + e.clientY - _dOy, window.innerHeight - _dH - 6))
   } else if (_resizing) {
-    const nw = Math.max(180, Math.min(_rNw + e.clientX - _rOx, window.innerWidth - pos.x - 6))
+    const nw = Math.max(props.minWidth, Math.min(_rNw + e.clientX - _rOx, window.innerWidth - pos.x - 6))
     emit('update:width', nw)
   }
 }
@@ -239,5 +244,12 @@ defineExpose({ initPos, reset, pos, minimized })
   background: radial-gradient(circle at 75% 75%, #555 1.5px, transparent 1.5px) 4px 4px / 6px 6px,
               radial-gradient(circle at 75% 75%, #555 1.5px, transparent 1.5px) 10px 10px / 6px 6px,
               radial-gradient(circle at 75% 75%, #555 1.5px, transparent 1.5px) 16px 16px / 6px 6px;
+  /* Each layer above is meant to place a single dot — the `background`
+     shorthand resets repeat to its default, and without no-repeat the
+     default tiling repeats every dot across the full 28x28 box, turning
+     three subtle corner dots into a dense grid that reads as one solid
+     gray square. Must come after the shorthand, not before — the
+     shorthand would reset it right back to `repeat`. */
+  background-repeat: no-repeat;
 }
 </style>

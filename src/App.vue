@@ -338,6 +338,7 @@
         @bring-to-front="bringCpToFront"
         :width="cpWidth"
         @update:width="cpWidth = $event"
+        :min-width="230"
         resizable
       >
         <template #icon>
