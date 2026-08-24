@@ -9,6 +9,7 @@ export const usePaintStore = defineStore('paint', {
     canvasH:       1920,
     layerIdSeq:    0,
     canvasBg:      '#1e1e1e',
+    layerPanelWidth: 260,
     userPalette: [
       '#000000','#ffffff','#ef4444','#f97316','#eab308',
       '#22c55e','#3b82f6','#8b5cf6','#ec4899','#06b6d4',

@@ -120,7 +120,12 @@
     </div>
 
     <!-- ── Layer panel ────────────────────────────────── -->
-    <div class="layer-panel" :class="{ collapsed: !isPanelOpen, 'lp-left': toolbarSide === 'left' }">
+    <div class="layer-panel"
+      :class="{ collapsed: !isPanelOpen, 'lp-left': toolbarSide === 'left', 'lp-resizing': panelResizing }"
+      :style="isPanelOpen ? { width: paintStore.layerPanelWidth + 'px' } : {}">
+      <div v-if="isPanelOpen" class="lp-resize-handle"
+        @mousedown.stop="startPanelResize" @touchstart.prevent.stop="startPanelResizeTouch"
+        :title="t('resizeLayerPanel')" />
       <div class="panel-inner">
         <div class="panel-header">
           <span class="panel-title">{{ t('layers') }}</span>
@@ -1259,6 +1264,39 @@ watch(toolbarSide, v => {
   localStorage.setItem('paint-toolbar-side', v)
   ;[cpRef, bpRef, fpRef, spRef, bkRef].forEach(r => r.value?.reset())
 })
+
+// ── Layer panel width (persisted, drag-resizable) ──────────
+const panelResizing = ref(false)
+let _prStartX = 0, _prStartW = 0
+
+function startPanelResize(e) {
+  panelResizing.value = true
+  _prStartX = e.clientX
+  _prStartW = paintStore.layerPanelWidth
+  window.addEventListener('mousemove', _onPanelResizeMove)
+  window.addEventListener('mouseup', _onPanelResizeUp)
+  window.addEventListener('touchmove', _onPanelResizeTouchMove, { passive: false })
+  window.addEventListener('touchend', _onPanelResizeUp)
+}
+function startPanelResizeTouch(e) { startPanelResize(e.touches[0]) }
+
+function _onPanelResizeMove(e) {
+  // The panel is screen-edge-anchored on whichever side the toolbar isn't,
+  // so which direction "wider" means depends on which edge is the free one.
+  const dx = e.clientX - _prStartX
+  const signedDx = toolbarSide.value === 'left' ? dx : -dx
+  paintStore.layerPanelWidth = Math.max(200, Math.min(_prStartW + signedDx, window.innerWidth - 120))
+}
+function _onPanelResizeTouchMove(e) {
+  if (panelResizing.value) { e.preventDefault(); _onPanelResizeMove(e.touches[0]) }
+}
+function _onPanelResizeUp() {
+  panelResizing.value = false
+  window.removeEventListener('mousemove', _onPanelResizeMove)
+  window.removeEventListener('mouseup', _onPanelResizeUp)
+  window.removeEventListener('touchmove', _onPanelResizeTouchMove)
+  window.removeEventListener('touchend', _onPanelResizeUp)
+}
 
 // ── Popup z-index ─────────────────────────────────────────
 let _popupZ = 9999
@@ -3350,7 +3388,7 @@ onUnmounted(() => {
   right: 34px;
   top: 34px;
   bottom: 0;
-  width: 220px;
+  width: 260px;
   overflow: hidden;
   transition: width 0.22s ease;
   background: #0d0d0d;
@@ -3362,12 +3400,32 @@ onUnmounted(() => {
 .layer-panel.collapsed {
   width: 0;
 }
+.layer-panel.lp-resizing {
+  transition: none;
+}
 .layer-panel.lp-left {
   right: auto;
   left: 34px;
   border-left: none;
   border-right: 1px solid #1a1a1a;
   box-shadow: 4px 0 16px rgba(0,0,0,0.4);
+}
+
+/* Drag strip on the panel's free edge (opposite the screen-anchored side) */
+.lp-resize-handle {
+  position: absolute;
+  top: 0; bottom: 0; left: -3px;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 5;
+  touch-action: none;
+}
+.lp-resize-handle:hover, .layer-panel.lp-resizing .lp-resize-handle {
+  background: rgba(96,96,204,0.4);
+}
+.layer-panel.lp-left .lp-resize-handle {
+  left: auto;
+  right: -3px;
 }
 
 /* Panel body — overflows and gets clipped when collapsed */

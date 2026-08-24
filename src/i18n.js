@@ -33,6 +33,7 @@ const messages = {
     lockLayer:       'Lock Layer',
     unlockLayer:     'Unlock Layer',
     layerOwnedByOther: "This is someone else's layer — view only",
+    resizeLayerPanel: 'Drag to resize',
     // Toolbar
     canvasSize:      'Canvas Size',
     canvasPreset:    'Presets',
@@ -204,6 +205,7 @@ const messages = {
     lockLayer:       '鎖定圖層',
     unlockLayer:     '解鎖圖層',
     layerOwnedByOther: '這是其他人的圖層,僅供檢視',
+    resizeLayerPanel: '拖曳調整寬度',
     // Toolbar
     canvasSize:      '畫布大小',
     canvasPreset:    '預設尺寸',
