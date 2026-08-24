@@ -60,7 +60,7 @@
 
 ## 尚未執行(需要你確認才會動手)
 
-- [ ] **部署**:`wrangler deploy`——這會直接動到 production 的 `atelier.re95.org`,還沒跑,等你明確說可以了才執行。建議先用一個測試用的 `/collab/<id>` session 實際兩台裝置對連驗證一次,再讓所有使用者切過去。
+- [x] **部署**:2026-08-24 透過 `git push origin main` 觸發 `deploy-pages.yml`(GitHub Actions)自動 `wrangler deploy`,run 成功(https://github.com/Restatw/Atelier/actions/runs/32693109230)。事後用腳本直接對 `wss://atelier.re95.org/sync/<roomId>` 做端對端測試(join/presence/broadcast/late-join sync-state/rev 衝突),全部通過。
 - [ ] **邊緣層濫用防護**(Cloudflare dashboard 手動設定,不是程式碼):
   - [x] WAF Rate Limiting Rule——`atelier-sync-limit`(ruleset id `7949966dec384362aac7c14a2748b59a`),URI Path wildcard `/sync/*`,`characteristics: ip.src`,`period: 10s` / `requests_per_period: 5`,`action: block`,`mitigation_timeout: 10s`,Active(2026-08-24 確認)。合理性已檢查:`/sync/*` 只在 WebSocket handshake 那一刻打一次,連上後訊息都走既有連線不會再計入,所以這個門檻限的是「10 秒內開幾條新連線」不影響正常畫布同步;跟 client 端重連退避(1s→2s→4s→8s)對得上。已知取捨:同一 IP 後面多人共用(NAT/公司網路)短時間一起加入同一房間有機會誤觸,Free 方案只能設 1 條規則、無法再細分,先維持現狀,之後有觀察到誤擋再調整。
   - [x] Worker 的 CPU time limit——`wrangler.toml` 加了 `[limits] cpu_ms = 50`(2026-08-24),`wrangler deploy --dry-run` 驗證過語法無誤。只有實際 `wrangler deploy` 之後才會生效,`wrangler dev` 本地不套用。
