@@ -1,12 +1,19 @@
 import { defineStore } from 'pinia'
 import { roomNamespace } from '../widgetContext.js'
 
+// First-visit default canvas orientation follows the viewport: a wide
+// (desktop-like) window gets a landscape canvas, a tall (phone-like) one
+// gets portrait. Only affects state.canvasW/H's factory default — an
+// existing project already has its own persisted size, and "New Project"
+// keeps whatever the current canvas size is rather than resetting to this.
+const landscapeDefault = window.innerWidth > window.innerHeight
+
 export const usePaintStore = defineStore('paint', {
   state: () => ({
     layersMeta:    [],
     activeLayerId: null,
-    canvasW:       1080,
-    canvasH:       1920,
+    canvasW:       landscapeDefault ? 1920 : 1080,
+    canvasH:       landscapeDefault ? 1080 : 1920,
     layerIdSeq:    0,
     canvasBg:      '#1e1e1e',
     layerPanelWidth: 260,
