@@ -2,6 +2,13 @@ name = "atelier"
 main = "cloudflare-worker/worker.js"
 compatibility_date = "2024-11-01"
 
+# Everything this worker does (serve static assets, generate the /og page,
+# handle a sync message) is cheap — cap CPU time per invocation so a bug or
+# abusive input can't run up compute cost. Only enforced once deployed, not
+# under `wrangler dev`.
+[limits]
+cpu_ms = 50
+
 routes = [
   { pattern = "atelier.re95.org/*", zone_name = "re95.org" }
 ]
@@ -10,3 +17,11 @@ routes = [
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+
+[[durable_objects.bindings]]
+name = "SYNC_ROOM"
+class_name = "SyncRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SyncRoom"]

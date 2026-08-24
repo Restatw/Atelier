@@ -1,14 +1,27 @@
-// Thin wrapper around the atelier-sync WebSocket service. Only ever
-// connects when a syncRoomId is present (widget room or standalone collab
-// session) — see widgetContext.js. Fully inert otherwise.
-import { io } from 'socket.io-client'
+// Thin wrapper around the atelier sync Durable Object. Only ever connects
+// when a syncRoomId is present (widget room or standalone collab session) —
+// see widgetContext.js. Fully inert otherwise.
 import { ref } from 'vue'
 import { syncRoomId, isSyncActive } from './widgetContext.js'
 import { generateIdentity } from './collabIdentity.js'
 
-const SYNC_URL = import.meta.env.VITE_SYNC_URL || 'https://sync.re95.org'
+// Same-origin by default — the sync room lives inside the atelier Worker
+// itself (cloudflare-worker/syncRoom.js), not a separate service. Override
+// via VITE_SYNC_URL only for pointing local dev at a different deployment.
+function defaultSyncBase() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${location.host}/sync`
+}
+const SYNC_BASE = import.meta.env.VITE_SYNC_URL || defaultSyncBase()
+
+const RECONNECT_MIN_MS = 1000
+const RECONNECT_MAX_MS = 15000
 
 let socket = null
+let reconnectAttempt = 0
+let reconnectTimer = null
+let stopped = true
+
 export const myIdentity   = generateIdentity()
 export const participants = ref([])   // [{ socketId, identity, activeLayerId }]
 export const syncConnected = ref(false)
@@ -39,37 +52,66 @@ function recordEdit(payload) {
 // arrives. Set via initCollabSync().
 let remoteUpdateHandler = null
 
+function send(payload) {
+  if (socket?.readyState !== WebSocket.OPEN) return
+  socket.send(JSON.stringify(payload))
+}
+
+function connect() {
+  socket = new WebSocket(`${SYNC_BASE}/${encodeURIComponent(syncRoomId)}`)
+
+  socket.addEventListener('open', () => {
+    reconnectAttempt = 0
+    syncConnected.value = true
+    send({ type: 'join', identity: myIdentity })
+  })
+
+  socket.addEventListener('close', () => {
+    syncConnected.value = false
+    scheduleReconnect()
+  })
+
+  socket.addEventListener('error', () => socket?.close())
+
+  socket.addEventListener('message', (event) => {
+    let msg
+    try { msg = JSON.parse(event.data) } catch { return }
+
+    if (msg.type === 'presence') {
+      participants.value = msg.participants || []
+    } else if (msg.type === 'sync-state') {
+      remoteUpdateHandler?.(msg)
+    } else if (msg.type === 'canvas-update') {
+      recordEdit(msg)
+      remoteUpdateHandler?.(msg)
+    }
+  })
+}
+
+function scheduleReconnect() {
+  if (stopped) return
+  clearTimeout(reconnectTimer)
+  const delay = Math.min(RECONNECT_MIN_MS * 2 ** reconnectAttempt, RECONNECT_MAX_MS)
+  reconnectAttempt++
+  reconnectTimer = setTimeout(connect, delay)
+}
+
 export function initCollabSync({ onRemoteUpdate } = {}) {
   if (!isSyncActive) return
   remoteUpdateHandler = onRemoteUpdate || null
-
-  socket = io(SYNC_URL)
-
-  socket.on('connect', () => {
-    syncConnected.value = true
-    socket.emit('join', { roomId: syncRoomId, identity: myIdentity })
-  })
-
-  socket.on('disconnect', () => { syncConnected.value = false })
-
-  socket.on('presence', (p) => { participants.value = p.participants || [] })
-
-  socket.on('sync-state', (payload) => { remoteUpdateHandler?.(payload) })
-  socket.on('canvas-update', (payload) => {
-    recordEdit(payload)
-    remoteUpdateHandler?.(payload)
-  })
+  stopped = false
+  connect()
 }
 
 // Pushes changed layers out to peers. No-op when sync isn't active.
 export function pushCanvasUpdate(payload) {
-  if (!socket || !syncConnected.value) return
-  socket.emit('canvas-update', payload)
+  if (!syncConnected.value) return
+  send({ type: 'canvas-update', ...payload })
 }
 
 // Lets peers know which layer this participant is currently working on, so
 // everyone can show avatar badges on the right layer.
 export function pushActiveLayer(layerId) {
-  if (!socket || !syncConnected.value) return
-  socket.emit('active-layer', { layerId })
+  if (!syncConnected.value) return
+  send({ type: 'active-layer', layerId })
 }

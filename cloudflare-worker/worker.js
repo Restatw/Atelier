@@ -1,17 +1,29 @@
 /**
  * Atelier main Worker
  *
+ * /sync/<roomId> — WebSocket upgrade for live canvas collaboration,
+ *   forwarded to a SyncRoom Durable Object (one instance per room).
  * /og?cid=...&thumb=... — OG preview page (no static asset, Worker always runs)
  *   Bots get OG meta tags; browsers get meta-refresh to the actual app.
  *
  * Everything else — static assets (dist/)
  */
 
+export { SyncRoom } from './syncRoom.js'
+
 const THUMB_GW = 'https://gateway.pinata.cloud/ipfs'
+const SYNC_PATH_PREFIX = '/sync/'
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
+
+    if (url.pathname.startsWith(SYNC_PATH_PREFIX)) {
+      const roomId = decodeURIComponent(url.pathname.slice(SYNC_PATH_PREFIX.length)).slice(0, 128)
+      if (!roomId) return new Response('missing room id', { status: 400 })
+      const stub = env.SYNC_ROOM.getByName(roomId)
+      return stub.fetch(request)
+    }
 
     if (url.pathname !== '/og') {
       return env.ASSETS.fetch(request)
