@@ -5,6 +5,11 @@ import { pushCanvasUpdate, pushActiveLayer, myIdentity } from '../collabSync.js'
 import { formatIdentityName } from '../collabIdentity.js'
 import { isSyncActive } from '../widgetContext.js'
 
+// Perf instrumentation — active only on the atelier-dev test subdomain, so
+// it never logs for real users. Toggle by hostname because there's no other
+// dev/prod split at runtime (both are the same production Vite build).
+const PERF_DEBUG = typeof window !== 'undefined' && /atelier-dev\./.test(window.location.hostname)
+
 // Layer ids are a shared namespace across every peer in a collab session
 // (the sync merge keys on id, and presence tracks activeLayerId by id
 // across clients) but each client mints its own ids locally with no
@@ -123,35 +128,139 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     return { id: ++layerIdSeq, name, visible: true, opacity: 100, locked: false, ownerId, canvas: createLayerCanvas(w, h) }
   }
 
-  function composite() {
+  // composite()'s full loop redraws every layer onto the display canvas —
+  // O(layer count) drawImage calls. That's fine once per stroke, but
+  // App.vue's requestComposite calls composite() on every throttled
+  // animation frame *while dragging*, and with 50 full-resolution layers
+  // that loop alone was measured at ~26ms/frame — over budget for 60fps by
+  // itself, enough on its own to make the browser start dropping mousemove
+  // events (see the "S becomes Z" symptom). But a live drag only ever
+  // mutates the *active* layer's own canvas (or the floating selection,
+  // which isn't a layer at all) — every other layer is static for the
+  // whole gesture. So cache everything below and everything above the
+  // active layer, split at its z-order, into two offscreen canvases; a
+  // live-drag frame then only needs to draw: cacheBelow, the active layer,
+  // the float overlay, cacheAbove — O(1) drawImage calls instead of O(N).
+  //
+  // The cache is rebuilt (a full O(N) pass) only when: the touched set
+  // includes anything other than "just the active layer" (or nothing at
+  // all) — i.e. any call site not confirmed to be active-layer/float-only
+  // — or the cache was built around a *different* active layer / canvas
+  // size than right now. Every such rebuild leaves the cache valid for the
+  // active layer as of that moment, so a whole stroke after the first
+  // touched frame runs entirely on the fast path.
+  let cacheBelow = null, cacheAbove = null, cacheW = 0, cacheH = 0, cacheActiveId = null
+
+  function rebuildCache(w, h, excludeId) {
+    if (!cacheBelow || cacheW !== w || cacheH !== h) {
+      cacheBelow = createLayerCanvas(w, h)
+      cacheAbove = createLayerCanvas(w, h)
+      cacheW = w; cacheH = h
+    }
+    const bctx = cacheBelow.getContext('2d')
+    const actx = cacheAbove.getContext('2d')
+    bctx.clearRect(0, 0, w, h)
+    actx.clearRect(0, 0, w, h)
+    let past = false
+    for (const layer of layers.value) {
+      if (layer.id === excludeId) { past = true; continue }
+      if (!layer.visible || !layer.canvas) continue
+      const c = past ? actx : bctx
+      c.globalAlpha = layer.opacity / 100
+      c.drawImage(layer.canvas, 0, 0)
+      c.globalAlpha = 1
+    }
+    cacheActiveId = excludeId
+  }
+
+  // `touchedIds`, when given, limits the thumbnail refresh to just those
+  // layers — see updateThumbs() below for why that matters. `skipThumbs`
+  // skips the thumbnail refresh entirely — callers driving the live canvas
+  // preview during a drag (App.vue's requestComposite) pass this, since the
+  // layer panel isn't visible mid-stroke anyway; the caller that finalizes
+  // the stroke on pointerup does its own composite(touchedIds) afterwards
+  // to catch the thumbnail up once, not every frame.
+  function composite(touchedIds, skipThumbs) {
     const display = canvasRef.value
     if (!display) return
+    const t0 = PERF_DEBUG ? performance.now() : 0
     const ctx = display.getContext('2d')
     const w = display.width, h = display.height
-    ctx.clearRect(0, 0, w, h)
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, w, h)
-    ctx.globalCompositeOperation = 'source-over'
-    for (const layer of layers.value) {
-      if (!layer.visible || !layer.canvas) continue
-      ctx.globalAlpha = layer.opacity / 100
-      ctx.drawImage(layer.canvas, 0, 0)
-      // float 懸浮內容插在 active layer 之後（同 opacity），保持正確的 z 順序
-      if (getFloatOverlay && layer.id === activeLayerId.value) {
+    const activeId = activeLayerId.value
+    const touchedSet = touchedIds == null ? null : new Set(Array.isArray(touchedIds) ? touchedIds : [touchedIds])
+    const activeOnly = touchedSet !== null && [...touchedSet].every(id => id === activeId)
+    let fast = false
+
+    if (activeOnly) {
+      if (!cacheBelow || cacheActiveId !== activeId || cacheW !== w || cacheH !== h) rebuildCache(w, h, activeId)
+      fast = true
+      ctx.clearRect(0, 0, w, h)
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, w, h)
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.drawImage(cacheBelow, 0, 0)
+      const active = layers.value.find(l => l.id === activeId)
+      if (active && active.visible && active.canvas) {
+        ctx.globalAlpha = active.opacity / 100
+        ctx.drawImage(active.canvas, 0, 0)
+        ctx.globalAlpha = 1
+      }
+      if (getFloatOverlay) {
         const fl = getFloatOverlay()
         if (fl) ctx.drawImage(fl.canvas, fl.x, fl.y)
       }
+      ctx.drawImage(cacheAbove, 0, 0)
+    } else {
+      ctx.clearRect(0, 0, w, h)
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, w, h)
+      ctx.globalCompositeOperation = 'source-over'
+      for (const layer of layers.value) {
+        if (!layer.visible || !layer.canvas) continue
+        ctx.globalAlpha = layer.opacity / 100
+        ctx.drawImage(layer.canvas, 0, 0)
+        // float 懸浮內容插在 active layer 之後（同 opacity），保持正確的 z 順序
+        if (getFloatOverlay && layer.id === activeId) {
+          const fl = getFloatOverlay()
+          if (fl) ctx.drawImage(fl.canvas, fl.x, fl.y)
+        }
+        ctx.globalAlpha = 1
+      }
       ctx.globalAlpha = 1
+      rebuildCache(w, h, activeId)
     }
-    ctx.globalAlpha = 1
-    updateThumbs()
+    if (PERF_DEBUG) {
+      const t1 = performance.now()
+      const dt = t1 - t0
+      if (dt > 4) console.log(`[perf] composite draw ${dt.toFixed(1)}ms (${w}x${h}, ${layers.value.length} layers, fast=${fast}, skipThumbs=${!!skipThumbs})`)
+    }
+    if (!skipThumbs) updateThumbs(touchedIds)
   }
 
-  function updateThumbs() {
+  // Redrawing a thumbnail means re-painting its checkerboard background plus
+  // a drawImage — cheap for one layer, but composite() runs on every
+  // throttled animation frame while dragging (App.vue's requestComposite),
+  // and doing that unconditionally for every layer regardless of whether it
+  // changed is O(layer count) *on every frame of every stroke*. With a
+  // couple dozen layers that's enough main-thread work to make the browser
+  // start dropping mousemove events under its own steam — the app never
+  // even sees the missing points, so a fast stroke's path looks like it cut
+  // corners (an "S" landing as a "Z"). Callers that know exactly which
+  // layer(s) actually changed pass `touchedIds` to skip everyone else;
+  // omit it (or pass undefined) to force refreshing every thumbnail — the
+  // safe default for any call site not confirmed to only touch specific
+  // layers.
+  function updateThumbs(touchedIds) {
+    const ids = touchedIds == null ? null : new Set(Array.isArray(touchedIds) ? touchedIds : [touchedIds])
+    const scheduledAt = PERF_DEBUG ? performance.now() : 0
     nextTick(() => {
+      const t0 = PERF_DEBUG ? performance.now() : 0
+      let painted = 0
       for (const layer of layers.value) {
+        if (ids && !ids.has(layer.id)) continue
         const thumb = thumbRefs[layer.id]
         if (!thumb || !layer.canvas) continue
+        painted++
         const tctx = thumb.getContext('2d')
         const tw = thumb.width, th = thumb.height
         for (let y = 0; y < th; y += 5)
@@ -160,6 +269,12 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
             tctx.fillRect(x, y, 5, 5)
           }
         tctx.drawImage(layer.canvas, 0, 0, tw, th)
+      }
+      if (PERF_DEBUG) {
+        const t1 = performance.now()
+        const dt = t1 - t0
+        const waitedForTick = t0 - scheduledAt
+        if (dt > 2 || waitedForTick > 16) console.log(`[perf] updateThumbs ${dt.toFixed(1)}ms painting ${painted} thumb(s) (nextTick wait ${waitedForTick.toFixed(1)}ms, filter=${ids ? ids.size : 'ALL'})`)
       }
     })
   }
@@ -419,14 +534,17 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   // any call site not confirmed to be layer-count/pixel-preserving.
   function saveHistory(touchedIds) {
     if (!canvasRef.value) return
+    const t0 = PERF_DEBUG ? performance.now() : 0
     const prevStates = history.value[historyIndex.value]?.states
     const prevById   = prevStates && new Map(prevStates.map(s => [s.id, s]))
-    const touchedSet = touchedIds && new Set(touchedIds)
+    const touchedSet = touchedIds == null ? null : new Set(Array.isArray(touchedIds) ? touchedIds : [touchedIds])
+    let encoded = 0
 
     const entry = {
       activeId: activeLayerId.value,
       states: layers.value.map(l => {
         const reused = touchedSet && !touchedSet.has(l.id) && prevById?.get(l.id)
+        if (!reused) encoded++
         return {
           id: l.id, name: l.name, visible: l.visible, opacity: l.opacity,
           dataURL: reused ? reused.dataURL : l.canvas.toDataURL(),
@@ -437,6 +555,10 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     history.value.push(entry)
     if (history.value.length > 15) history.value.shift()
     historyIndex.value = history.value.length - 1
+    if (PERF_DEBUG) {
+      const dt = performance.now() - t0
+      if (dt > 4) console.log(`[perf] saveHistory ${dt.toFixed(1)}ms (${encoded}/${layers.value.length} layers re-encoded via toDataURL)`)
+    }
     schedulePersist()
   }
 

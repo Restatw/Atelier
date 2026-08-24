@@ -215,14 +215,14 @@
                   v-model.number="layer.opacity"
                   class="op-slider"
                   :disabled="!isLayerEditable(layer)"
-                  @input="requestComposite()"
+                  @input="requestComposite(layer.id)"
                   @change="saveHistory([])"
                 />
                 <div class="op-val-wrap">
                   <input type="number" class="op-val-input" min="0" max="100"
                     :value="layer.opacity"
                     :disabled="!isLayerEditable(layer)"
-                    @change="layer.opacity = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = layer.opacity; composite(); saveHistory([])"
+                    @change="layer.opacity = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = layer.opacity; composite(undefined, true); saveHistory([])"
                     @keydown.enter.stop="$event.target.blur()"
                     @focus.stop="$event.target.select()"
                     @mousedown.stop @touchstart.stop
@@ -953,6 +953,9 @@ import { formatIdentityName } from './collabIdentity.js'
 import { sendRoomMessage } from './widgetApi.js'
 import { initCollabSync, participants, myIdentity, syncConnected, recentEdits, RECENT_EDIT_WINDOW_MS } from './collabSync.js'
 
+// Perf instrumentation — active only on the atelier-dev test subdomain.
+const PERF_DEBUG = /atelier-dev\./.test(window.location.hostname)
+
 // ── Store ─────────────────────────────────────────────────
 const paintStore = usePaintStore()
 
@@ -1117,12 +1120,41 @@ const {
 // instead. Discrete call sites (stroke end, tool commits, undo/redo, ...)
 // keep calling composite() directly so their result renders immediately,
 // not a frame later.
+//
+// touchedIds, when the caller knows it, is forwarded to composite()'s own
+// touchedIds so the (also O(layer count)) thumbnail refresh inside it stays
+// scoped to whichever layer(s) this drag actually touches — pass a single
+// id, an array (empty if the drag genuinely doesn't touch any layer's own
+// canvas, e.g. moving a floating selection around), or omit it entirely if
+// that's not knowable (composite() then falls back to refreshing every
+// thumbnail, its safe default). Accumulated across however many calls land
+// before the frame fires — if any of them is "unknown", the whole batch
+// conservatively refreshes everything.
+//
+// requestComposite always skips the thumbnail refresh (skipThumbs=true):
+// this is the live-drag path, called on every pointermove, and the layer
+// panel isn't even visible mid-stroke. Whoever ends the drag (pointerup
+// handlers etc.) calls composite(touchedIds) directly afterwards — no
+// skipThumbs — to catch the thumbnail up exactly once, instead of every
+// frame of the stroke.
 let _compositeRAF = null
-function requestComposite() {
+let _compositeTouched = new Set()
+let _compositeTouchedAll = false
+function requestComposite(touchedIds) {
+  if (touchedIds === undefined) _compositeTouchedAll = true
+  else for (const id of Array.isArray(touchedIds) ? touchedIds : [touchedIds]) _compositeTouched.add(id)
   if (_compositeRAF) return
+  const requestedAt = PERF_DEBUG ? performance.now() : 0
   _compositeRAF = requestAnimationFrame(() => {
     _compositeRAF = null
-    composite()
+    if (PERF_DEBUG) {
+      const delay = performance.now() - requestedAt
+      if (delay > 20) console.log(`[perf] requestComposite rAF delayed ${delay.toFixed(1)}ms — main thread busy`)
+    }
+    const ids = _compositeTouchedAll ? undefined : Array.from(_compositeTouched)
+    _compositeTouched = new Set()
+    _compositeTouchedAll = false
+    composite(ids, true)
   })
 }
 
@@ -1664,7 +1696,7 @@ function commitFloat() {
   const ctx = activeLayer.value.canvas.getContext('2d')
   ctx.drawImage(selFloat.canvas, selFloat.x, selFloat.y)
   selFloat = null
-  composite()
+  composite(activeLayerId.value)
   saveHistory([activeLayerId.value])
 }
 
@@ -1889,7 +1921,7 @@ function handleSelRectDown(p) {
           layer.canvas.getContext('2d').clearRect(r.x, r.y, r.w, r.h)
           selFloat = { canvas: fc, x: r.x, y: r.y }
         }
-        composite()
+        composite(layer.id)
       }
       selDragStart = { mx: p.x, my: p.y, fx: selFloat.x, fy: selFloat.y, rx: r.x, ry: r.y }
       selState.value = 'moving'
@@ -1921,7 +1953,9 @@ function handleSelMoveMove(p) {
   selFloat.y = selDragStart.fy + dy
   const r = selRect.value
   selRect.value = { x: selDragStart.rx + dx, y: selDragStart.ry + dy, w: r.w, h: r.h }
-  requestComposite()
+  // Only the floating selection's position moves here, not any layer's own
+  // canvas — nothing for the thumbnail refresh to catch up on.
+  requestComposite([])
   renderSelOverlay()
 }
 
@@ -1966,7 +2000,7 @@ function handleLassoDown(p) {
           layer.canvas.getContext('2d').clearRect(r.x, r.y, r.w, r.h)
           selFloat = { canvas: fc, x: r.x, y: r.y }
         }
-        composite()
+        composite(layer.id)
       }
       selDragStart = { mx: p.x, my: p.y, fx: selFloat.x, fy: selFloat.y, rx: r.x, ry: r.y }
       selState.value = 'moving'
@@ -2104,7 +2138,8 @@ function handleTransformMove(p) {
   selFloat.canvas = nc
   selFloat.x = 0; selFloat.y = 0
   selRect.value = { x, y, w, h }
-  requestComposite()
+  // Reshapes selFloat, a scratch canvas — not any layer's own canvas.
+  requestComposite([])
   renderSelOverlay()
 }
 
@@ -2336,7 +2371,7 @@ function commitText() {
   const lh    = fontSize.value * 1.2
   lines.forEach((line, i) => ctx.fillText(line, textPos.value.x, textPos.value.y + i * lh))
   ctx.restore()
-  composite()
+  composite(activeLayerId.value)
   saveHistory([activeLayerId.value])
   cancelText()
 }
@@ -2378,12 +2413,13 @@ function handleMoveMove(p) {
   const ctx = layer.canvas.getContext('2d')
   ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height)
   ctx.putImageData(layerSnapshot, dx, dy)
-  requestComposite()
+  requestComposite(layer.id)
 }
 
 function handleMoveUp() {
   if (!drawing) return
   drawing = false; layerSnapshot = null
+  composite(activeLayerId.value)
   saveHistory([activeLayerId.value])
 }
 
@@ -2560,7 +2596,12 @@ function handleMixMove(p) {
     stampMixAt(ctx, { x: mixLast.x + dx * i / steps, y: mixLast.y + dy * i / steps })
   }
   mixLast = { x: p.x, y: p.y }
-  requestComposite()
+  // Usually paints onto the active layer directly; in selDrawMode it's
+  // actually selFloat that gets touched instead (no layer canvas changes
+  // then) — pass activeLayerId either way since a redundant refresh for a
+  // layer that turns out untouched is harmless, unlike skipping one that
+  // wasn't.
+  requestComposite(activeLayerId.value)
 }
 
 function handleMixUp() {
@@ -2733,7 +2774,7 @@ function onPointerDown(e) {
       const clip = selActive.value ? selRect.value : null
       floodFill(p.x, p.y, activeDrawColor(), clip)
     }
-    composite()
+    composite(activeLayerId.value)
     saveHistory([activeLayerId.value])
     return
   }
@@ -2760,7 +2801,18 @@ function onPointerDown(e) {
   }
 }
 
+let _lastPointerMoveAt = 0
 function onPointerMove(e) {
+  if (!PERF_DEBUG || e._atelierHandled) { _onPointerMoveInner(e); return }
+  const now = performance.now()
+  if (_lastPointerMoveAt && now - _lastPointerMoveAt > 40)
+    console.log(`[perf] pointermove gap ${(now - _lastPointerMoveAt).toFixed(1)}ms since last — event(s) likely dropped/coalesced by the browser`)
+  _lastPointerMoveAt = now
+  _onPointerMoveInner(e)
+  const dt = performance.now() - now
+  if (dt > 8) console.log(`[perf] onPointerMove handler took ${dt.toFixed(1)}ms`)
+}
+function _onPointerMoveInner(e) {
   // While a drag is active this same native event reaches us twice — once
   // via the wrapper's own @mousemove (bubble phase, cursor still over the
   // canvas) and again via the window listener added in onPointerDown — so
@@ -2840,7 +2892,7 @@ function onPointerMove(e) {
     } else {
       ctx.drawImage(tmp, 0, 0)
     }
-    requestComposite()
+    requestComposite(activeLayerId.value)
     return
   }
 
@@ -2862,7 +2914,7 @@ function onPointerMove(e) {
     for (let i = 1; i < strokePoints.length; i++) ctx.lineTo(strokePoints[i].x, strokePoints[i].y)
     ctx.stroke()
     if (currentTool.value === 'eraser') ctx.globalCompositeOperation = 'source-over'
-    requestComposite()
+    requestComposite(activeLayerId.value)
   } else if (layerSnapshot) {
     ctx.putImageData(layerSnapshot, 0, 0)
     applyStyle(ctx)
@@ -2876,7 +2928,7 @@ function onPointerMove(e) {
       ctx.drawImage(maskCache, 0, 0)
       ctx.globalCompositeOperation = 'source-over'
     }
-    requestComposite()
+    requestComposite(activeLayerId.value)
   }
 }
 
@@ -2944,7 +2996,7 @@ function _onPointerUpInner() {
   if (currentTool.value === 'lasso'    && drawing)    { drawing = false; handleLassoUp();   return }
   if (currentTool.value === 'sel_pen'  && drawing)    { drawing = false; handleSelPenUp();  return }
   if (currentTool.value === 'sel_eras' && drawing)    { drawing = false; handleSelErasUp(); return }
-  if (currentTool.value === 'mix'      && drawing)    { drawing = false; handleMixUp(); composite(); saveHistory([activeLayerId.value]); return }
+  if (currentTool.value === 'mix'      && drawing)    { drawing = false; handleMixUp(); composite(activeLayerId.value); saveHistory([activeLayerId.value]); return }
 
   if (!drawing) return
   drawing = false
@@ -2956,7 +3008,7 @@ function _onPointerUpInner() {
     ctx.globalCompositeOperation = 'source-over'
     ctx.globalAlpha = 1
   }
-  composite()
+  composite(activeLayerId.value)
   saveHistory([activeLayerId.value])
 }
 
