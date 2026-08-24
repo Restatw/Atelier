@@ -10,7 +10,9 @@ compatibility_date = "2024-11-01"
 cpu_ms = 50
 
 routes = [
-  { pattern = "atelier.re95.org/*", zone_name = "re95.org" }
+  { pattern = "atelier.re95.org/*", zone_name = "re95.org" },
+  { pattern = "re95.org/*", zone_name = "re95.org" },
+  { pattern = "www.re95.org/*", zone_name = "re95.org" }
 ]
 
 [assets]
