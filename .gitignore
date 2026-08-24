@@ -5,3 +5,6 @@ dist/
 .env.local
 .env.*.local
 .env.deploy
+
+# Local planning notes — not for the public repo
+SYNC_MIGRATION_PLAN.md

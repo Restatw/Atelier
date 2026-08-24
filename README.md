@@ -10,6 +10,7 @@ Multi-layer drawing with various tools, IPFS backup, and PWA support — works o
 - **Drawing Tools** — Pencil, brush, eraser, line, rectangle, circle, fill bucket, eyedropper, text
 - **Selection Tools** — Rectangular select, lasso, magic wand (with float/move support)
 - **Layers** — Add, delete, duplicate, merge, reorder, opacity control
+- **Live Collaboration** — Draw together in real time; each participant gets their own layer, which others can view but not edit until its owner unlocks it. Layers can also be locked individually, collab or not, to protect them from accidental edits. Start a session from the app or embed it as a Matrix widget.
 - **Sticky Notes** — Draggable, resizable, minimizable floating text notes
 - **Color Palette** — Custom colors, brush size and opacity controls
 - **Canvas Zoom & Rotation** — Zoom in/out and freely rotate the viewport
@@ -26,6 +27,13 @@ Multi-layer drawing with various tools, IPFS backup, and PWA support — works o
 - [Pinia](https://pinia.vuejs.org/) + `pinia-plugin-persistedstate`
 - [Lucide Vue Next](https://lucide.dev/) icons
 - Canvas 2D API, IndexedDB
+- [Cloudflare Workers](https://developers.cloudflare.com/workers/) + [Durable Objects](https://developers.cloudflare.com/durable-objects/) for live collaboration sync (`cloudflare-worker/`)
+
+## Live Collaboration
+
+Each collab room is backed by a `SyncRoom` Durable Object (one instance per room, addressed by room id — see `cloudflare-worker/syncRoom.js`), reached over a WebSocket at `/sync/<roomId>`. Room state (layers, participants) lives in memory only for as long as someone's connected; there's no persistent storage behind it.
+
+Every layer records who created it (`ownerId`). In a live room, a layer can only be drawn on, renamed, resized, reordered, hidden, or deleted by its owner — everyone else sees it grayed out. A layer's owner can also lock it explicitly (a general lock-layer feature, usable outside collab too), which blocks edits even from themselves until unlocked. This is enforced both client-side (so it's actually usable) and server-side (so a stray or buggy client can't clobber someone else's layer), though identity itself is just a randomly generated per-session label — there's no authentication behind it.
 
 ## Getting Started
 
