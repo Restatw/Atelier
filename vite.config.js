@@ -14,7 +14,6 @@ function getChangelog(n = 8) {
 export default defineConfig({
   define: {
     __APP_VERSION__:  JSON.stringify(Date.now().toString()),
-    __GITHUB_URL__:   JSON.stringify('https://github.com/Restatw/Atelier'),
     __CHANGELOG__:    JSON.stringify(getChangelog()),
   },
   plugins: [

@@ -119,7 +119,6 @@ const messages = {
     // Changelog
     changelogTitle:    "What's New",
     changelogGotIt:    'Got it',
-    changelogSource:   'Source on GitHub',
     changelogVersion:  'Build',
     // IPFS Backup
     ipfsOpenFromCid:       'Open from IPFS',
@@ -291,7 +290,6 @@ const messages = {
     // 公告
     changelogTitle:    '最新更新',
     changelogGotIt:    '知道了',
-    changelogSource:   '查看原始碼',
     changelogVersion:  '版本',
     // IPFS 備份
     ipfsOpenFromCid:       'IPFS 開啟',
