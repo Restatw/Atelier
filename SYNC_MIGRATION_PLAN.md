@@ -61,11 +61,18 @@
 ## 尚未執行(需要你確認才會動手)
 
 - [x] **部署**:2026-08-24 透過 `git push origin main` 觸發 `deploy-pages.yml`(GitHub Actions)自動 `wrangler deploy`,run 成功(https://github.com/Restatw/Atelier/actions/runs/32693109230)。事後用腳本直接對 `wss://atelier.re95.org/sync/<roomId>` 做端對端測試(join/presence/broadcast/late-join sync-state/rev 衝突),全部通過。
-- [ ] **邊緣層濫用防護**(Cloudflare dashboard 手動設定,不是程式碼):
+- [x] **邊緣層濫用防護**(Cloudflare dashboard 手動設定,不是程式碼):
   - [x] WAF Rate Limiting Rule——`atelier-sync-limit`(ruleset id `7949966dec384362aac7c14a2748b59a`),URI Path wildcard `/sync/*`,`characteristics: ip.src`,`period: 10s` / `requests_per_period: 5`,`action: block`,`mitigation_timeout: 10s`,Active(2026-08-24 確認)。合理性已檢查:`/sync/*` 只在 WebSocket handshake 那一刻打一次,連上後訊息都走既有連線不會再計入,所以這個門檻限的是「10 秒內開幾條新連線」不影響正常畫布同步;跟 client 端重連退避(1s→2s→4s→8s)對得上。已知取捨:同一 IP 後面多人共用(NAT/公司網路)短時間一起加入同一房間有機會誤觸,Free 方案只能設 1 條規則、無法再細分,先維持現狀,之後有觀察到誤擋再調整。
   - [x] Worker 的 CPU time limit——`wrangler.toml` 加了 `[limits] cpu_ms = 50`(2026-08-24),`wrangler deploy --dry-run` 驗證過語法無誤。只有實際 `wrangler deploy` 之後才會生效,`wrangler dev` 本地不套用。
   - [x] Billing/Usage Notifications——已有兩條 budget alert:Cloudflare 自動建立的 $10 門檻,以及使用者自訂的 $5 門檻「帳單預算警示」(2026-08-24 確認)。
 - [ ] **下線舊服務**:確認新路徑穩定後,停用 `/srv/atelier-sync` 的 docker-compose、移除 `sync.re95.org` 的 nginx site(`/etc/nginx/sites-available/sync.re95.org.conf`)與 `/etc/cloudflared/config.yml` 裡的 `sync.re95.org` ingress 條目。
+
+## GitHub Actions 待處理(2026-08-24 稽核,慢慢修)
+
+- [x] `actions/checkout` / `actions/setup-node` 從 v4 升到 v7(2026-08-24)——v4 已被 GitHub 標記 deprecated、被強制在 Node 24 runner 上跑,遲早會失效。確認過 v4→v7 沒有影響到這個 repo 用法的 breaking change(v5 的自動套件管理器快取偵測要 `package.json` 有 `packageManager` 欄位才會觸發,這個專案沒有)。三個 workflow 檔案都升了。跑過一次 push 驗證,run 乾淨無警告。
+- [ ] **補基本測試/lint 關卡**:`package.json` 有 `playwright` devDependency 但 `scripts` 沒有定義任何 `test` 指令,`deploy-pages.yml` 是 install → build → deploy 直接上,中間沒有任何檢查關卡。之後改到容易壞但不容易發現的功能(例如這次的 sync)時風險較高,建議至少加個 build 產物基本檢查或 playwright smoke test 卡在 deploy 前面。
+- [ ] **清掉沒用到的 `CF_PAGES_PROJECT` secret**:三個 workflow 檔案都沒有引用它,應該是專案從 Cloudflare Pages 遷移到 Workers Static Assets 之前留下的殘留。
+- [ ] **`deploy-ipfs.yml` / `deploy-nginx.yml` 跟現有架構脫節**:兩者手動觸發、不在自動部署路徑上,走的邏輯是「build dist → 複製到 nginx web root」,但 `atelier.re95.org` 現在完全由 Worker Route 接管,沒人在 serve 那份 nginx 內容。要保留(當備援方案)還是移除看之後決定,先記錄現況。
 
 ## 相關檔案
 
