@@ -65,7 +65,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   function toggleLock(layer) {
     if (!canToggleLock(layer)) return
     layer.locked = !layer.locked
-    saveHistory()
+    saveHistory([])
   }
 
   // Called once a collab session is connected. If this participant doesn't
@@ -89,7 +89,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     layers.value.push(layer)
     activeLayerId.value = layer.id
     composite()
-    saveHistory()
+    saveHistory([layer.id])
   }
 
   function createLayerCanvas(w, h) {
@@ -387,14 +387,30 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     }
   }
 
-  function saveHistory() {
+  // `touchedIds`, when given, is the set of layer ids whose PIXELS actually
+  // changed since the last snapshot — every other layer's dataURL is reused
+  // from the previous history entry instead of re-encoded. toDataURL() is a
+  // full-canvas PNG encode, so re-running it for every layer on every single
+  // stroke (the old unconditional behaviour) is O(layer count) synchronous,
+  // blocking work after every pointer-up; with a couple dozen layers that's
+  // enough to make the app visibly stall on each stroke. Omit `touchedIds`
+  // (or pass undefined) to force a full re-encode — the safe default for
+  // any call site not confirmed to be layer-count/pixel-preserving.
+  function saveHistory(touchedIds) {
     if (!canvasRef.value) return
+    const prevStates = history.value[historyIndex.value]?.states
+    const prevById   = prevStates && new Map(prevStates.map(s => [s.id, s]))
+    const touchedSet = touchedIds && new Set(touchedIds)
+
     const entry = {
       activeId: activeLayerId.value,
-      states: layers.value.map(l => ({
-        id: l.id, name: l.name, visible: l.visible, opacity: l.opacity,
-        dataURL: l.canvas.toDataURL()
-      }))
+      states: layers.value.map(l => {
+        const reused = touchedSet && !touchedSet.has(l.id) && prevById?.get(l.id)
+        return {
+          id: l.id, name: l.name, visible: l.visible, opacity: l.opacity,
+          dataURL: reused ? reused.dataURL : l.canvas.toDataURL(),
+        }
+      })
     }
     history.value = history.value.slice(0, historyIndex.value + 1)
     history.value.push(entry)
@@ -452,7 +468,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     layers.value.push(layer)
     activeLayerId.value = layer.id
     composite()
-    saveHistory()
+    saveHistory([layer.id])
   }
 
   function duplicateLayer() {
@@ -466,7 +482,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     layers.value.splice(activeIndex.value + 1, 0, layer)
     activeLayerId.value = layer.id
     composite()
-    saveHistory()
+    saveHistory([layer.id])
   }
 
   function deleteActiveLayer() {
@@ -476,7 +492,9 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     layers.value.splice(idx, 1)
     activeLayerId.value = layers.value[Math.min(idx, layers.value.length - 1)].id
     composite()
-    saveHistory()
+    // Every surviving layer's pixels are untouched by a delete — only the
+    // set of layers changed, so there's nothing here that needs re-encoding.
+    saveHistory([])
   }
 
   function toggleVisible(layer) {
@@ -492,7 +510,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     const arr = layers.value;
     [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]]
     composite()
-    saveHistory()
+    saveHistory([])
   }
 
   function moveDown() {
@@ -502,7 +520,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     const arr = layers.value;
     [arr[i], arr[i - 1]] = [arr[i - 1], arr[i]]
     composite()
-    saveHistory()
+    saveHistory([])
   }
 
   function mergeDown() {
@@ -518,7 +536,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     layers.value.splice(i, 1)
     activeLayerId.value = bot.id
     composite()
-    saveHistory()
+    saveHistory([bot.id])
   }
 
   function mergeAll() {
@@ -551,7 +569,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
       ctx.fillRect(0, 0, layer.canvas.width, layer.canvas.height)
     }
     composite()
-    saveHistory()
+    saveHistory([layer.id])
   }
 
   function download() {
@@ -592,7 +610,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     layers.value.push(layer)
     activeLayerId.value = layer.id
     composite()
-    saveHistory()
+    saveHistory([layer.id])
   }
 
   function getThumbnailBlob() {

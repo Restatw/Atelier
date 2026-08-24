@@ -215,14 +215,14 @@
                   v-model.number="layer.opacity"
                   class="op-slider"
                   :disabled="!isLayerEditable(layer)"
-                  @input="composite()"
-                  @change="saveHistory()"
+                  @input="requestComposite()"
+                  @change="saveHistory([])"
                 />
                 <div class="op-val-wrap">
                   <input type="number" class="op-val-input" min="0" max="100"
                     :value="layer.opacity"
                     :disabled="!isLayerEditable(layer)"
-                    @change="layer.opacity = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = layer.opacity; composite(); saveHistory()"
+                    @change="layer.opacity = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = layer.opacity; composite(); saveHistory([])"
                     @keydown.enter.stop="$event.target.blur()"
                     @focus.stop="$event.target.select()"
                     @mousedown.stop @touchstart.stop
@@ -1101,6 +1101,25 @@ const {
   isLayerEditable, canToggleLock, toggleLock,
 } = lc
 
+// composite() redraws every layer onto the display canvas — cost scales
+// with layer count. Pointer-move handlers (freehand strokes, shape preview,
+// mix/move/transform drags, ...) can fire far more often than the screen
+// actually repaints, so calling composite() directly from them means
+// redoing that full-layer redraw many times more than what's ever shown —
+// with a couple dozen layers, enough to make the whole app stall while
+// dragging. Coalesce those call sites to at most once per animation frame
+// instead. Discrete call sites (stroke end, tool commits, undo/redo, ...)
+// keep calling composite() directly so their result renders immediately,
+// not a frame later.
+let _compositeRAF = null
+function requestComposite() {
+  if (_compositeRAF) return
+  _compositeRAF = requestAnimationFrame(() => {
+    _compositeRAF = null
+    composite()
+  })
+}
+
 const bk = useIpfsBackup({
   getProjectData: () => lc.getProjectData(canvasBg.value, userPalette.value),
   getThumbnail:   () => lc.getThumbnailBlob(),
@@ -1634,7 +1653,7 @@ function commitFloat() {
   ctx.drawImage(selFloat.canvas, selFloat.x, selFloat.y)
   selFloat = null
   composite()
-  saveHistory()
+  saveHistory([activeLayerId.value])
 }
 
 function applyMaskClip(ctx) {
@@ -1890,7 +1909,7 @@ function handleSelMoveMove(p) {
   selFloat.y = selDragStart.fy + dy
   const r = selRect.value
   selRect.value = { x: selDragStart.rx + dx, y: selDragStart.ry + dy, w: r.w, h: r.h }
-  composite()
+  requestComposite()
   renderSelOverlay()
 }
 
@@ -2073,7 +2092,7 @@ function handleTransformMove(p) {
   selFloat.canvas = nc
   selFloat.x = 0; selFloat.y = 0
   selRect.value = { x, y, w, h }
-  composite()
+  requestComposite()
   renderSelOverlay()
 }
 
@@ -2306,7 +2325,7 @@ function commitText() {
   lines.forEach((line, i) => ctx.fillText(line, textPos.value.x, textPos.value.y + i * lh))
   ctx.restore()
   composite()
-  saveHistory()
+  saveHistory([activeLayerId.value])
   cancelText()
 }
 
@@ -2347,13 +2366,13 @@ function handleMoveMove(p) {
   const ctx = layer.canvas.getContext('2d')
   ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height)
   ctx.putImageData(layerSnapshot, dx, dy)
-  composite()
+  requestComposite()
 }
 
 function handleMoveUp() {
   if (!drawing) return
   drawing = false; layerSnapshot = null
-  saveHistory()
+  saveHistory([activeLayerId.value])
 }
 
 // ── File operations ───────────────────────────────────────
@@ -2529,7 +2548,7 @@ function handleMixMove(p) {
     stampMixAt(ctx, { x: mixLast.x + dx * i / steps, y: mixLast.y + dy * i / steps })
   }
   mixLast = { x: p.x, y: p.y }
-  composite()
+  requestComposite()
 }
 
 function handleMixUp() {
@@ -2692,7 +2711,7 @@ function onPointerDown(e) {
       floodFill(p.x, p.y, activeDrawColor(), clip)
     }
     composite()
-    saveHistory()
+    saveHistory([activeLayerId.value])
     return
   }
   if (currentTool.value === 'eyedropper') {
@@ -2792,7 +2811,7 @@ function onPointerMove(e) {
     } else {
       ctx.drawImage(tmp, 0, 0)
     }
-    composite()
+    requestComposite()
     return
   }
 
@@ -2814,7 +2833,7 @@ function onPointerMove(e) {
     for (let i = 1; i < strokePoints.length; i++) ctx.lineTo(strokePoints[i].x, strokePoints[i].y)
     ctx.stroke()
     if (currentTool.value === 'eraser') ctx.globalCompositeOperation = 'source-over'
-    composite()
+    requestComposite()
   } else if (layerSnapshot) {
     ctx.putImageData(layerSnapshot, 0, 0)
     applyStyle(ctx)
@@ -2828,7 +2847,7 @@ function onPointerMove(e) {
       ctx.drawImage(maskCache, 0, 0)
       ctx.globalCompositeOperation = 'source-over'
     }
-    composite()
+    requestComposite()
   }
 }
 
@@ -2886,7 +2905,7 @@ function _onPointerUpInner() {
   if (currentTool.value === 'lasso'    && drawing)    { drawing = false; handleLassoUp();   return }
   if (currentTool.value === 'sel_pen'  && drawing)    { drawing = false; handleSelPenUp();  return }
   if (currentTool.value === 'sel_eras' && drawing)    { drawing = false; handleSelErasUp(); return }
-  if (currentTool.value === 'mix'      && drawing)    { drawing = false; handleMixUp(); composite(); saveHistory(); return }
+  if (currentTool.value === 'mix'      && drawing)    { drawing = false; handleMixUp(); composite(); saveHistory([activeLayerId.value]); return }
 
   if (!drawing) return
   drawing = false
@@ -2899,7 +2918,7 @@ function _onPointerUpInner() {
     ctx.globalAlpha = 1
   }
   composite()
-  saveHistory()
+  saveHistory([activeLayerId.value])
 }
 
 function onPointerLeave() {
@@ -3491,6 +3510,11 @@ onUnmounted(() => {
 }
 
 .layer-item {
+  /* Skip layout/paint for rows scrolled out of view — with two dozen+
+     layers each carrying a thumbnail <canvas>, the browser was doing real
+     rendering work for off-screen rows on every scroll frame. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
   display: flex;
   align-items: center;
   gap: 4px;
