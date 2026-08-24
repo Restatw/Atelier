@@ -1,11 +1,24 @@
 import { ref, computed, reactive, nextTick, watch } from 'vue'
 import { dbGet, dbPut, dbDelMany } from '../db.js'
-import { t } from '../i18n.js'
-import { pushCanvasUpdate, pushActiveLayer } from '../collabSync.js'
+import { t, locale } from '../i18n.js'
+import { pushCanvasUpdate, pushActiveLayer, myIdentity } from '../collabSync.js'
+import { formatIdentityName } from '../collabIdentity.js'
 import { isSyncActive } from '../widgetContext.js'
 
+// Layer ids are a shared namespace across every peer in a collab session
+// (the sync merge keys on id, and presence tracks activeLayerId by id
+// across clients) but each client mints its own ids locally with no
+// central coordination. Seeding the counter from a large random offset
+// instead of 0 means two people opening the same brand-new room in fresh
+// tabs — both starting from "no layers yet" — don't both hand their very
+// first layer the id 1, which the merge would then treat as the same
+// layer and silently overwrite one with the other's content.
+function freshLayerIdSeq() {
+  return Math.floor(Math.random() * 1e9)
+}
+
 export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
-  let layerIdSeq = 0
+  let layerIdSeq = freshLayerIdSeq()
 
   const canvasRef      = ref(null)
   const thumbRefs      = reactive({})
@@ -27,14 +40,66 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   const activeLayer     = computed(() => layers.value[activeIndex.value] ?? null)
   const displayedLayers = computed(() => [...layers.value].reverse())
 
+  // A layer is editable when it isn't explicitly locked, and — in a collab
+  // session — either has no recorded owner yet (pre-this-feature legacy
+  // content) or is owned by this participant. Solo (non-collab) sessions
+  // never have an ownerId to check, so only `locked` applies there.
+  function isLayerEditable(layer) {
+    if (!layer) return false
+    if (layer.locked) return false
+    if (isSyncActive && layer.ownerId && layer.ownerId !== myIdentity.id) return false
+    return true
+  }
+
+  // Only a layer's owner (or anyone, solo/unowned) may toggle its lock —
+  // otherwise locking would just be a no-op version of ownership, and
+  // unlocking someone else's layer would defeat the point of ownership
+  // entirely. This is deliberately independent of isLayerEditable(): the
+  // owner must be able to toggle the lock even while it's currently locked.
+  function canToggleLock(layer) {
+    if (!layer) return false
+    if (!isSyncActive) return true
+    return !layer.ownerId || layer.ownerId === myIdentity.id
+  }
+
+  function toggleLock(layer) {
+    if (!canToggleLock(layer)) return
+    layer.locked = !layer.locked
+    saveHistory()
+  }
+
+  // Called once a collab session is connected. If this participant doesn't
+  // yet own any layer in the room (brand new room, or an existing one they
+  // haven't drawn in before), gives them their own — mirrors what init()
+  // already does for the very first layer of a fresh local project.
+  // Named after this participant, not a generic "Layer N" — in a collab
+  // room there's one of these per person, so a name that only makes sense
+  // for a single canvas (e.g. "Background") is actively misleading once a
+  // second person has one too.
+  function myLayerName() {
+    return formatIdentityName(myIdentity, locale.value) + t('layerOwnerSuffix')
+  }
+
+  function ensureOwnLayer() {
+    if (!isSyncActive) return
+    if (layers.value.some(l => l.ownerId === myIdentity.id)) return
+    const w = canvasRef.value?.width || 800
+    const h = canvasRef.value?.height || 600
+    const layer = makeLayer(myLayerName(), w, h, myIdentity.id)
+    layers.value.push(layer)
+    activeLayerId.value = layer.id
+    composite()
+    saveHistory()
+  }
+
   function createLayerCanvas(w, h) {
     const c = document.createElement('canvas')
     c.width = w; c.height = h
     return c
   }
 
-  function makeLayer(name, w, h) {
-    return { id: ++layerIdSeq, name, visible: true, opacity: 100, canvas: createLayerCanvas(w, h) }
+  function makeLayer(name, w, h, ownerId = null) {
+    return { id: ++layerIdSeq, name, visible: true, opacity: 100, locked: false, ownerId, canvas: createLayerCanvas(w, h) }
   }
 
   function composite() {
@@ -99,7 +164,8 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     const prev = _lastSynced.get(l.id)
     if (!prev) return true
     return prev.dataURL !== dataURL || prev.name !== l.name ||
-      prev.visible !== l.visible || prev.opacity !== l.opacity
+      prev.visible !== l.visible || prev.opacity !== l.opacity ||
+      prev.locked !== l.locked || prev.ownerId !== l.ownerId
   }
 
   // Saves current layer state to local IndexedDB/paintStore only — no
@@ -107,7 +173,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   // context (local edit or after merging a remote update) without side
   // effects on what's considered "already pushed".
   async function persistLocalOnly() {
-    const meta    = layers.value.map(l => ({ id: l.id, name: l.name, visible: l.visible, opacity: l.opacity }))
+    const meta    = layers.value.map(l => ({ id: l.id, name: l.name, visible: l.visible, opacity: l.opacity, locked: l.locked, ownerId: l.ownerId }))
     const oldIds  = paintStore.layersMeta.map(m => `layer-${m.id}`)
     const newIds  = new Set(meta.map(m => `layer-${m.id}`))
     const toDelete = oldIds.filter(k => !newIds.has(k))
@@ -142,9 +208,22 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     const removedLayerIds = Array.from(_lastSynced.keys()).filter(id => !currentIds.has(id))
     const changed = layers.value
       .map((l, i) => ({ l, dataURL: dataURLs[i] }))
+      // Never re-broadcast a layer owned by someone else. A peer's layer
+      // reaches us as a decode → drawImage → re-encode round trip (see
+      // applyRemoteLayers), which isn't guaranteed to produce byte-
+      // identical dataURL output even for pixel-identical content — so
+      // comparing our own re-encoding against _lastSynced can flag a peer's
+      // untouched layer as "changed" purely from re-encoding noise. Two
+      // peers doing that to each other is an unbounded tug-of-war where
+      // whoever's rev happens to land last wins, silently reverting the
+      // other's real edit — exactly the rejected_stale churn this guards
+      // against. Only the owner (or anyone, for legacy layers with no
+      // recorded owner) is ever a legitimate source for a layer's content.
+      .filter(({ l }) => !l.ownerId || l.ownerId === myIdentity.id)
       .filter(({ l, dataURL }) => _layerDiffers(l, dataURL))
       .map(({ l, dataURL }) => ({
         id: l.id, name: l.name, visible: l.visible, opacity: l.opacity,
+        locked: l.locked, ownerId: l.ownerId,
         dataURL, rev: Date.now(),
       }))
 
@@ -160,7 +239,8 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
 
     for (const id of removedLayerIds) _lastSynced.delete(id)
     layers.value.forEach((l, i) => _lastSynced.set(l.id, {
-      name: l.name, visible: l.visible, opacity: l.opacity, dataURL: dataURLs[i],
+      name: l.name, visible: l.visible, opacity: l.opacity,
+      locked: l.locked, ownerId: l.ownerId, dataURL: dataURLs[i],
     }))
   }
 
@@ -213,6 +293,8 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
           existing.name    = incoming.name
           existing.visible = incoming.visible
           existing.opacity = incoming.opacity
+          existing.locked  = incoming.locked ?? false
+          existing.ownerId = incoming.ownerId ?? existing.ownerId ?? null
           if (incoming.dataURL) {
             await new Promise(resolve => {
               const img = new Image()
@@ -250,7 +332,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
               img.src = incoming.dataURL
             })
           }
-          const layer = { id: incoming.id, name: incoming.name, visible: incoming.visible, opacity: incoming.opacity, canvas }
+          const layer = { id: incoming.id, name: incoming.name, visible: incoming.visible, opacity: incoming.opacity, locked: incoming.locked ?? false, ownerId: incoming.ownerId ?? null, canvas }
           byId.set(incoming.id, layer)
           layerIdSeq = Math.max(layerIdSeq, incoming.id)
         }
@@ -359,7 +441,14 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   function addLayer() {
     const w = canvasRef.value?.width || 800
     const h = canvasRef.value?.height || 600
-    const layer = makeLayer(`${t('layerDefault')} ${layers.value.length + 1}`, w, h)
+    // In a collab room, number relative to how many layers THIS person
+    // already owns, not the room's total layer count — otherwise everyone
+    // sharing one numbering sequence makes "Layer 5" tell you nothing about
+    // whose it is, which is the opposite of the point of myLayerName().
+    const name = isSyncActive
+      ? `${myLayerName()} ${layers.value.filter(l => l.ownerId === myIdentity.id).length + 1}`
+      : `${t('layerDefault')} ${layers.value.length + 1}`
+    const layer = makeLayer(name, w, h, isSyncActive ? myIdentity.id : null)
     layers.value.push(layer)
     activeLayerId.value = layer.id
     composite()
@@ -370,7 +459,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     const src = activeLayer.value
     if (!src) return
     const w = src.canvas.width, h = src.canvas.height
-    const layer = makeLayer(src.name + t('layerCopySuffix'), w, h)
+    const layer = makeLayer(src.name + t('layerCopySuffix'), w, h, isSyncActive ? myIdentity.id : null)
     layer.visible = src.visible
     layer.opacity = src.opacity
     layer.canvas.getContext('2d').drawImage(src.canvas, 0, 0)
@@ -382,6 +471,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
 
   function deleteActiveLayer() {
     if (layers.value.length <= 1) return
+    if (!isLayerEditable(activeLayer.value)) return
     const idx = activeIndex.value
     layers.value.splice(idx, 1)
     activeLayerId.value = layers.value[Math.min(idx, layers.value.length - 1)].id
@@ -390,6 +480,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   }
 
   function toggleVisible(layer) {
+    if (!isLayerEditable(layer)) return
     layer.visible = !layer.visible
     composite()
   }
@@ -397,6 +488,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   function moveUp() {
     const i = activeIndex.value
     if (i >= layers.value.length - 1) return
+    if (!isLayerEditable(layers.value[i])) return
     const arr = layers.value;
     [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]]
     composite()
@@ -406,6 +498,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   function moveDown() {
     const i = activeIndex.value
     if (i <= 0) return
+    if (!isLayerEditable(layers.value[i])) return
     const arr = layers.value;
     [arr[i], arr[i - 1]] = [arr[i - 1], arr[i]]
     composite()
@@ -417,6 +510,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     if (i <= 0) return
     const top = layers.value[i]
     const bot = layers.value[i - 1]
+    if (!isLayerEditable(top) || !isLayerEditable(bot)) return
     const ctx = bot.canvas.getContext('2d')
     ctx.globalAlpha = top.opacity / 100
     ctx.drawImage(top.canvas, 0, 0)
@@ -449,6 +543,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   function clearLayer() {
     const layer = activeLayer.value
     if (!layer) return
+    if (!isLayerEditable(layer)) return
     const ctx = layer.canvas.getContext('2d')
     ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height)
     if (activeIndex.value === 0) {
@@ -490,7 +585,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   function importImageLayer(img, name) {
     const w = canvasLogicalW.value
     const h = canvasLogicalH.value
-    const layer = makeLayer(name, w, h)
+    const layer = makeLayer(name, w, h, isSyncActive ? myIdentity.id : null)
     const ctx = layer.canvas.getContext('2d')
     const scale = Math.min(w / img.width, h / img.height, 1)
     ctx.drawImage(img, (w - img.width * scale) / 2, (h - img.height * scale) / 2, img.width * scale, img.height * scale)
@@ -554,7 +649,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     canvasRef.value.height = h
     canvasSize.value = { w, h }
 
-    layerIdSeq = project.layerIdSeq ?? Math.max(0, ...project.layers.map(l => l.id))
+    layerIdSeq = Math.max(project.layerIdSeq ?? Math.max(0, ...project.layers.map(l => l.id)), freshLayerIdSeq())
 
     const restored = await Promise.all(
       project.layers.map(meta => new Promise(resolve => {
@@ -580,11 +675,11 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
 
   function resetToBlank() {
     const w = canvasLogicalW.value, h = canvasLogicalH.value
-    layerIdSeq = 0
+    layerIdSeq = freshLayerIdSeq()
     // Transparent, like every layer addLayer() creates — a new project's
     // first layer used to be baked-in opaque white, which was the one case
     // where a "new layer" wasn't actually blank.
-    const bg = makeLayer(t('layerBg'), w, h)
+    const bg = makeLayer(t('layerBg'), w, h, isSyncActive ? myIdentity.id : null)
     canvasRef.value.width  = w; canvasRef.value.height = h
     layers.value = [bg]
     activeLayerId.value = bg.id
@@ -626,7 +721,12 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     canvasSize.value = { w, h }
 
     if (paintStore.layersMeta.length > 0) {
-      layerIdSeq = paintStore.layerIdSeq
+      // Bump into the collision-resistant random range even when restoring
+      // an old persisted counter (see freshLayerIdSeq's comment) — without
+      // this, a browser that already has local data for this room from
+      // before that fix existed keeps minting new layer ids from its old
+      // low value, which can still collide with another peer's.
+      layerIdSeq = Math.max(paintStore.layerIdSeq, freshLayerIdSeq())
 
       const restored = await Promise.all(
         paintStore.layersMeta.map(async meta => {
@@ -640,7 +740,7 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
               img.src = dataURL
             })
           }
-          return { id: meta.id, name: meta.name, visible: meta.visible, opacity: meta.opacity, canvas }
+          return { id: meta.id, name: meta.name, visible: meta.visible, opacity: meta.opacity, locked: meta.locked ?? false, ownerId: meta.ownerId ?? null, canvas }
         })
       )
 
@@ -648,6 +748,15 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
       activeLayerId.value = paintStore.activeLayerId
       if (!layers.value.find(l => l.id === activeLayerId.value))
         activeLayerId.value = layers.value.at(-1)?.id ?? null
+    } else if (isSyncActive) {
+      // No opaque fill and no "Background" name here: this branch runs
+      // once per participant with no local history for this room, not
+      // once per room — a filled "Background" layer from every joiner
+      // stacks one opaque white rectangle per person, each one blotting
+      // out whatever the others already drew underneath it.
+      const layer = makeLayer(myLayerName(), w, h, myIdentity.id)
+      layers.value = [layer]
+      activeLayerId.value = layer.id
     } else {
       const bg    = makeLayer(t('layerBg'), w, h)
       const bgCtx = bg.canvas.getContext('2d')
@@ -671,5 +780,6 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
     toggleVisible, moveUp, moveDown, mergeDown, mergeAll, clearLayer,
     download, doExport, importImageLayer, getThumbnailBlob, getProjectData, exportProject, loadProject,
     resetToBlank, resizeCanvasTo, init, applyRemoteLayers,
+    isLayerEditable, canToggleLock, toggleLock, ensureOwnLayer,
   }
 }

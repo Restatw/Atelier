@@ -127,8 +127,8 @@
           <div class="panel-actions">
             <button @click="addLayer"          :title="t('addLayer')"><Plus :size="14" /></button>
             <button @click="duplicateLayer"    :title="t('duplicateLayer')"><Copy :size="14" /></button>
-            <button @click="mergeDown"         :title="t('mergeDown')" :disabled="activeIndex <= 0"><ArrowDownToLine :size="14" /></button>
-            <button @click="deleteActiveLayer" :title="t('deleteLayer')" :disabled="layers.length <= 1"><Trash2 :size="14" /></button>
+            <button @click="mergeDown"         :title="t('mergeDown')" :disabled="activeIndex <= 0 || !isLayerEditable(activeLayer) || !isLayerEditable(layers[activeIndex - 1])"><ArrowDownToLine :size="14" /></button>
+            <button @click="deleteActiveLayer" :title="t('deleteLayer')" :disabled="layers.length <= 1 || !isLayerEditable(activeLayer)"><Trash2 :size="14" /></button>
           </div>
         </div>
         <div class="layer-list">
@@ -136,30 +136,40 @@
             v-for="layer in displayedLayers"
             :key="layer.id"
             class="layer-item"
-            :class="{ active: layer.id === activeLayerId }"
+            :class="{ active: layer.id === activeLayerId, 'lp-readonly': !isLayerEditable(layer) }"
+            :title="!isLayerEditable(layer) && isSyncActive && layer.ownerId && layer.ownerId !== myIdentity.id ? t('layerOwnedByOther') : undefined"
             @click="activeLayerId = layer.id"
           >
             <div class="layer-controls">
               <button class="lc-btn"
                 :style="{ visibility: layer.id !== activeLayerId ? 'hidden' : 'visible' }"
                 @click.stop="moveUp"
-                :disabled="activeIndex >= layers.length - 1" :title="t('moveUp')">
+                :disabled="activeIndex >= layers.length - 1 || !isLayerEditable(layer)" :title="t('moveUp')">
                 <ChevronUp :size="13" /></button>
               <button class="lc-btn"
                 :style="{ visibility: layer.id !== activeLayerId || editingId === layer.id ? 'hidden' : 'visible' }"
-                @click.stop="editingId = layer.id" :title="t('rename')">
+                @click.stop="isLayerEditable(layer) && (editingId = layer.id)"
+                :disabled="!isLayerEditable(layer)" :title="t('rename')">
                 <Pen :size="11" /></button>
               <button class="lc-btn"
                 :style="{ visibility: layer.id !== activeLayerId ? 'hidden' : 'visible' }"
                 @click.stop="moveDown"
-                :disabled="activeIndex <= 0" :title="t('moveDown')">
+                :disabled="activeIndex <= 0 || !isLayerEditable(layer)" :title="t('moveDown')">
                 <ChevronDown :size="13" /></button>
               <button class="lc-btn"
                 :style="{ visibility: layer.id !== activeLayerId ? 'hidden' : 'visible' }"
                 @click.stop="toggleVisible(layer)"
+                :disabled="!isLayerEditable(layer)"
                 :title="layer.visible ? t('hideLayer') : t('showLayer')">
                 <Eye v-if="layer.visible" :size="11" />
                 <EyeOff v-else :size="11" style="opacity:0.4" />
+              </button>
+              <button v-if="canToggleLock(layer)" class="lc-btn"
+                :style="{ visibility: layer.id !== activeLayerId ? 'hidden' : 'visible' }"
+                @click.stop="toggleLock(layer)"
+                :title="layer.locked ? t('unlockLayer') : t('lockLayer')">
+                <Lock v-if="layer.locked" :size="11" />
+                <Unlock v-else :size="11" style="opacity:0.4" />
               </button>
             </div>
             <div style="position:relative">
@@ -168,6 +178,10 @@
                 :ref="el => { if (el) thumbRefs[layer.id] = el; else delete thumbRefs[layer.id] }"
                 width="44" height="33"
               />
+              <div v-if="!isLayerEditable(layer)"
+                style="position:absolute;top:-4px;left:-4px;background:#333;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,0.4)">
+                <Lock :size="9" style="color:#ccc" />
+              </div>
               <div v-if="isSyncActive && layerParticipants(layer.id).length"
                 style="position:absolute;bottom:-4px;right:-4px;display:flex;gap:1px">
                 <span v-for="p in layerParticipants(layer.id)" :key="p.socketId"
@@ -195,12 +209,14 @@
                   type="range" min="0" max="100"
                   v-model.number="layer.opacity"
                   class="op-slider"
+                  :disabled="!isLayerEditable(layer)"
                   @input="composite()"
                   @change="saveHistory()"
                 />
                 <div class="op-val-wrap">
                   <input type="number" class="op-val-input" min="0" max="100"
                     :value="layer.opacity"
+                    :disabled="!isLayerEditable(layer)"
                     @change="layer.opacity = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = layer.opacity; composite(); saveHistory()"
                     @keydown.enter.stop="$event.target.blur()"
                     @focus.stop="$event.target.select()"
@@ -922,7 +938,7 @@ import {
   Plus, Copy, ArrowDownToLine, X, Pen, ArrowLeftRight, Minimize2,
   ZoomIn, ZoomOut, Settings, Upload, Folder, CloudUpload,
   SquareDashedMousePointer, LassoSelect, PenLine, Paintbrush, Move, Wand2,
-  Type, Bold, Italic, Blend
+  Type, Bold, Italic, Blend, Lock, Unlock
 } from 'lucide-vue-next'
 import { useIpfsBackup } from './composables/useIpfsBackup.js'
 import { isWidget, isSyncActive, isCollabSession, generateCollabSessionId } from './widgetContext.js'
@@ -1082,6 +1098,7 @@ const {
   addLayer, duplicateLayer, deleteActiveLayer,
   toggleVisible, moveUp, moveDown, mergeDown, mergeAll, clearLayer,
   importImageLayer, getThumbnailBlob, exportProject, loadProject, resetToBlank, resizeCanvasTo,
+  isLayerEditable, canToggleLock, toggleLock,
 } = lc
 
 const bk = useIpfsBackup({
@@ -2598,7 +2615,7 @@ function onPointerDown(e) {
     return
   }
   drawingButton = e.button
-  if (!activeLayer.value) return
+  if (!activeLayer.value || !isLayerEditable(activeLayer.value)) return
   const p = canvasPoint(e)
   startX = p.x; startY = p.y
 
@@ -2771,31 +2788,44 @@ function onPointerMove(e) {
 }
 
 // A remote sync update can arrive (async image decode) at any point,
-// including mid-stroke. Drawing tools write directly onto the active
-// layer's canvas via a live-held context (getActiveCtx()), so swapping
-// that canvas's content out from under an in-progress stroke corrupts it
-// (broken paths, opacity artifacts). Queue remote updates while drawing
-// and apply them once the current stroke finishes instead.
+// including mid-stroke, and applyRemoteLayers() itself is async (each
+// incoming layer's dataURL decodes via Image.onload). Two updates arriving
+// close together — e.g. a peer sending several quick edits — must never
+// run through applyRemoteLayers() concurrently: whichever decode happens
+// to resolve last wins regardless of arrival order, and both calls stamp
+// _lastSynced from their own possibly-stale intermediate snapshot, which
+// can make an already-applied peer edit look locally "changed" again and
+// get echoed back to the server with a rev older than what that peer just
+// pushed (see the rejected_stale log in syncRoom.js). So every update
+// always goes through this one queue and is drained strictly one at a
+// time, never in parallel — additionally paused while the local user is
+// mid-stroke, since drawing tools write onto the active layer's canvas via
+// a live-held context (getActiveCtx()) and swapping that canvas's content
+// out from under an in-progress stroke corrupts it.
 let _pendingRemoteUpdates = []
+let _drainingRemoteUpdates = false
 
 function queueOrApplyRemoteUpdate(payload) {
-  if (drawing) _pendingRemoteUpdates.push(payload)
-  else lc.applyRemoteLayers(payload)
+  _pendingRemoteUpdates.push(payload)
+  drainRemoteUpdates()
 }
 
-async function flushPendingRemoteUpdates() {
-  if (!_pendingRemoteUpdates.length) return
-  const queue = _pendingRemoteUpdates
-  _pendingRemoteUpdates = []
-  // Sequential, not parallel: overlapping calls would race on the shared
-  // _applyingRemote flag (one call's `finally` resetting it while another
-  // is still mid-merge) and on layers.value itself.
-  for (const p of queue) await lc.applyRemoteLayers(p)
+async function drainRemoteUpdates() {
+  if (_drainingRemoteUpdates) return
+  _drainingRemoteUpdates = true
+  try {
+    while (_pendingRemoteUpdates.length && !drawing) {
+      const payload = _pendingRemoteUpdates.shift()
+      await lc.applyRemoteLayers(payload)
+    }
+  } finally {
+    _drainingRemoteUpdates = false
+  }
 }
 
 function onPointerUp() {
   _onPointerUpInner()
-  if (!drawing) flushPendingRemoteUpdates()
+  if (!drawing) drainRemoteUpdates()
 }
 
 function _onPointerUpInner() {
@@ -2873,6 +2903,7 @@ onMounted(async () => {
   await lc.init()
 
   initCollabSync({ onRemoteUpdate: queueOrApplyRemoteUpdate })
+  lc.ensureOwnLayer()
   if (isSyncActive) nowTickTimer = setInterval(() => { nowTick.value = Date.now() }, 5000)
 
   changelogOpen.value = true
@@ -3407,6 +3438,8 @@ onUnmounted(() => {
 }
 .layer-item:hover   { background: #141414; }
 .layer-item.active  { background: #1a1a1a; border-left: 3px solid #6060cc; padding-left: 5px; }
+.layer-item.lp-readonly          { opacity: 0.5; filter: grayscale(0.6); }
+.layer-item.lp-readonly.active   { border-left-color: #555; }
 
 .layer-controls {
   display: flex;

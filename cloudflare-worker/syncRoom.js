@@ -41,7 +41,7 @@ export class SyncRoom extends DurableObject {
         .filter(id => this.layers.has(id))
         .map(id => {
           const l = this.layers.get(id)
-          return { id, name: l.name, visible: l.visible, opacity: l.opacity, dataURL: l.dataURL, rev: l.rev }
+          return { id, name: l.name, visible: l.visible, opacity: l.opacity, locked: l.locked, ownerId: l.ownerId, dataURL: l.dataURL, rev: l.rev }
         }),
     }
   }
@@ -115,31 +115,89 @@ export class SyncRoom extends DurableObject {
       if (!msg.layers) return
       this.canvasW = msg.canvasW ?? this.canvasW
       this.canvasH = msg.canvasH ?? this.canvasH
-      if (Array.isArray(msg.layerOrder)) this.layerOrder = msg.layerOrder
 
       const applied = []
+      const rejectedStale = []
+      const rejectedForeign = []
       for (const incoming of msg.layers) {
         const existing = this.layers.get(incoming.id)
+
+        // Ownership guard: once a layer has a recorded owner, only that
+        // owner's own connection may write to it again — including
+        // creating it in the first place under someone else's claimed
+        // ownerId. A layer with no recorded owner (legacy content from
+        // before this feature) stays writable by anyone, matching the
+        // client's own isLayerEditable() rule. This isn't real access
+        // control — identity is self-asserted at join and never verified,
+        // so a deliberately misbehaving client could still lie about who
+        // it is. What this actually guards against is a buggy or stale
+        // *legitimate* client accidentally re-pushing a peer's layer with
+        // re-encoded bytes (decode → drawImage → re-encode isn't
+        // guaranteed byte-identical — see useLayers.js's pushChangesToSync
+        // comment), which is exactly what caused layers to silently revert
+        // during this app's development.
+        const ownerOfRecord = existing?.ownerId ?? incoming.ownerId ?? null
+        if (ownerOfRecord && ownerOfRecord !== p.identity?.id) {
+          rejectedForeign.push(`${incoming.id}(owner=${ownerOfRecord} socket identity=${p.identity?.id})`)
+          continue
+        }
+
         // Stale/out-of-order delivery guard: ignore if we've already
-        // applied an equal-or-newer revision for this layer.
-        if (existing && existing.rev >= incoming.rev) continue
+        // applied an equal-or-newer revision for this layer. Also the
+        // tripwire for two peers' layer ids colliding (see collabSync.js's
+        // freshLayerIdSeq comment) — a collision shows up here as one
+        // peer's genuinely new layer getting silently rejected because it
+        // happens to reuse an id the room already has a newer rev for.
+        if (existing && existing.rev >= incoming.rev) {
+          rejectedStale.push(`${incoming.id}(existing owner=${existing.ownerId} rev=${existing.rev} vs incoming owner=${incoming.ownerId} rev=${incoming.rev})`)
+          continue
+        }
         this.layers.set(incoming.id, {
           name: incoming.name, visible: incoming.visible, opacity: incoming.opacity,
+          locked: incoming.locked, ownerId: incoming.ownerId,
           dataURL: incoming.dataURL, rev: incoming.rev,
         })
         applied.push(incoming)
       }
+      const removedOk = []
       if (Array.isArray(msg.removedLayerIds)) {
-        for (const id of msg.removedLayerIds) this.layers.delete(id)
+        for (const id of msg.removedLayerIds) {
+          const existing = this.layers.get(id)
+          if (existing?.ownerId && existing.ownerId !== p.identity?.id) {
+            rejectedForeign.push(`${id}(delete blocked, owner=${existing.ownerId} socket identity=${p.identity?.id})`)
+            continue
+          }
+          this.layers.delete(id)
+          removedOk.push(id)
+        }
       }
 
-      if (applied.length || msg.removedLayerIds?.length) {
+      // Merge, don't replace: a sender's layerOrder only reflects the
+      // layers *they* know about locally. Applying it verbatim would drop
+      // any layer this room actually still has (e.g. one a peer just
+      // created, or one this sender tried to delete but the ownership
+      // guard above rejected) out of snapshotState() for future joiners,
+      // even though this.layers still has it.
+      if (Array.isArray(msg.layerOrder)) {
+        const known = new Set(this.layers.keys())
+        const merged = msg.layerOrder.filter(id => known.has(id))
+        for (const id of known) if (!merged.includes(id)) merged.push(id)
+        this.layerOrder = merged
+      }
+
+      this.log(`canvas-update socket=${socketId} applied=[${applied.map(l => `${l.id}:${l.rev}`).join(',')}]`
+        + (rejectedStale.length ? ` rejected_stale=[${rejectedStale.join(';')}]` : '')
+        + (rejectedForeign.length ? ` rejected_foreign=[${rejectedForeign.join(';')}]` : '')
+        + (removedOk.length ? ` removed=[${removedOk.join(',')}]` : '')
+        + ` layerOrder=[${(this.layerOrder || []).join(',')}]`)
+
+      if (applied.length || removedOk.length) {
         this.broadcast({
           type: 'canvas-update',
           canvasW: this.canvasW, canvasH: this.canvasH,
           layerOrder: this.layerOrder,
           layers: applied,
-          removedLayerIds: msg.removedLayerIds || [],
+          removedLayerIds: removedOk,
           identity: p.identity,
         }, ws)
       }

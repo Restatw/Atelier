@@ -30,6 +30,9 @@ const messages = {
     moveDown:        'Move Down',
     hideLayer:       'Hide Layer',
     showLayer:       'Show Layer',
+    lockLayer:       'Lock Layer',
+    unlockLayer:     'Unlock Layer',
+    layerOwnedByOther: "This is someone else's layer — view only",
     // Toolbar
     canvasSize:      'Canvas Size',
     canvasPreset:    'Presets',
@@ -92,6 +95,7 @@ const messages = {
     layerCopySuffix:   ' Copy',
     layerMerged:       'Merged Layer',
     layerBg:           'Background',
+    layerOwnerSuffix:  ' Layer',
     // Info bar
     layerCountPrefix:  '',
     layerCountUnit:    'layers',
@@ -197,6 +201,9 @@ const messages = {
     moveDown:        '下移圖層',
     hideLayer:       '隱藏圖層',
     showLayer:       '顯示圖層',
+    lockLayer:       '鎖定圖層',
+    unlockLayer:     '解鎖圖層',
+    layerOwnedByOther: '這是其他人的圖層,僅供檢視',
     // Toolbar
     canvasSize:      '畫布大小',
     canvasPreset:    '預設尺寸',
@@ -259,6 +266,7 @@ const messages = {
     layerCopySuffix:   ' 複本',
     layerMerged:       '合併圖層',
     layerBg:           '背景',
+    layerOwnerSuffix:  ' 圖層',
     // Info bar
     layerCountPrefix:  '共 ',
     layerCountUnit:    '圖層',
