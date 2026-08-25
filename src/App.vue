@@ -23,56 +23,11 @@
             @touchmove.prevent="onTouchMove"
             @touchend.prevent="onTouchEnd"
           />
-        <!-- Sticky notes layer -->
-        <div class="sticky-layer">
-          <div
-            v-for="note in stickyNotes" :key="note.id"
-            class="sticky-note"
-            :class="{ 'sn-active': note.id === activeNoteId, 'sn-minimized': note.minimized }"
-            :style="{ left: note.x+'px', top: note.y+'px', width: note.minimized ? '36px' : note.w+'px', height: note.minimized ? '36px' : note.h+'px', background: note.color, zIndex: note.z }"
-            @mousedown.stop="bringToFront(note)"
-            @touchstart.stop
-          >
-            <!-- Minimized: small square float button -->
-            <template v-if="note.minimized">
-              <div class="sn-mini-body"
-                @mousedown.stop="startDrag(note, $event)"
-                @touchstart.prevent.stop="startDragTouch(note, $event)"
-                @click.stop="note.minimized = false">
-                <StickyNote :size="16" style="opacity:0.55" />
-              </div>
-              <button class="sn-mini-close" @click.stop="deleteNote(note.id)" @mousedown.stop @touchstart.stop><X :size="9" /></button>
-            </template>
-            <!-- Expanded: full note -->
-            <template v-else>
-              <div class="sn-header"
-                @mousedown.stop="startDrag(note, $event)"
-                @touchstart.prevent.stop="startDragTouch(note, $event)">
-                <div class="sn-colors">
-                  <button v-for="c in noteColors" :key="c" class="sn-color-dot"
-                    :style="{ background: c }"
-                    @click.stop="note.color = c" @mousedown.stop @touchstart.stop />
-                </div>
-                <div class="sn-btns">
-                  <button class="sn-minimize" @click.stop="note.minimized = true" @mousedown.stop @touchstart.stop :title="t('minimize')">
-                    <Minimize2 :size="11" />
-                  </button>
-                  <button class="sn-close" @click.stop="deleteNote(note.id)" @mousedown.stop @touchstart.stop><X :size="11" /></button>
-                </div>
-              </div>
-              <textarea
-                class="sn-text"
-                v-model="note.text"
-                :placeholder="t('stickyPlaceholder')"
-                @mousedown.stop
-                @touchstart.stop
-              />
-              <div class="sn-resize"
-                @mousedown.stop="startResize(note, $event)"
-                @touchstart.prevent.stop="startResizeTouch(note, $event)" />
-            </template>
-          </div>
-        </div>
+        <!-- Widget plugins (e.g. sticky notes) — each renders its own
+             floating layer positioned in canvas/view coordinates. -->
+        <component
+          v-for="p in widgetPlugins" :key="p.id"
+          :is="p.component" :plugin="p" :view-refs="widgetViewRefs" />
         <!-- Selection overlays -->
         <canvas ref="selMaskOverlayRef" class="sel-overlay sel-mask-ov" />
         <canvas ref="selBorderOverlayRef" class="sel-overlay" />
@@ -237,56 +192,27 @@
 
     <!-- ── Vertical toolbar (rightmost / leftmost) ──── -->
     <aside class="toolbar" :class="{ 'tb-left': toolbarSide === 'left' }">
-      <!-- File management -->
-      <button ref="fileTriggerRef" class="tool-btn" :class="{ active: filePopupOpen }" @click.stop="toggleFilePopup" :title="t('fileManagement')"><Folder :size="16" /></button>
       <input ref="importInputRef" type="file" accept="image/*" style="display:none" @change="onImportFile" />
       <input ref="projectInputRef" type="file" accept=".atelier,application/json" style="display:none" @change="onProjectFile" />
 
-      <div class="tb-sep" />
-
-      <!-- Brush / tool settings -->
-      <button ref="toolTriggerRef" class="tool-btn tool-selector"
-        :class="{ active: tools.some(x => x.id === currentTool) }"
-        :title="t('brushSettings')"
-        @click.stop="toggleBrushPopup">
-        <component :is="lastDrawToolComp" :size="16" />
-      </button>
-
-      <div class="tb-sep" />
-
-      <!-- Color / Palette -->
-      <button ref="colorTriggerRef" class="tool-btn color-trigger"
-        :class="{ active: colorPopupOpen }"
-        @click.stop="toggleColorPopup" :title="t('colorSettings')">
-        <div class="ts-fill"   :style="{ background: fillColor }" />
-        <div class="ts-stroke" :style="{ background: currentColor }" />
-      </button>
-
-      <div class="tb-sep" />
-
-      <!-- Actions -->
-      <button class="tool-btn" :disabled="historyIndex <= 0" @click="undo" :title="t('undo')"><Undo2 :size="16" /></button>
-      <button class="tool-btn" :disabled="historyIndex >= history.length - 1" @click="redo" :title="t('redo')"><Redo2 :size="16" /></button>
-
-      <!-- Move / Select tools -->
-      <div class="tb-sep" />
-      <button class="tool-btn" :class="{ active: currentTool === 'move' }"        @click="currentTool = 'move'"        :title="t('tool_move')"><Move :size="16" /></button>
-      <button class="tool-btn" :class="{ active: currentTool === 'select_rect' }"  @click="currentTool = 'select_rect'"  :title="t('tool_select_rect')"><SquareDashedMousePointer :size="16" /></button>
-      <button class="tool-btn" :class="{ active: currentTool === 'lasso' }"        @click="currentTool = 'lasso'"        :title="t('tool_lasso')"><LassoSelect :size="16" /></button>
-      <button ref="wandBtnRef" class="tool-btn" :class="{ active: currentTool === 'magic_wand' }" @click.stop="toggleWandPopup" :title="t('tool_magic_wand')"><Wand2 :size="16" /></button>
-      <button ref="textBtnRef" class="tool-btn" :class="{ active: currentTool === 'text' }"         @click.stop="toggleTextPopup" :title="t('tool_text')"><Type :size="16" /></button>
-
-      <!-- Canvas view controls -->
-      <div class="tb-sep" />
-      <button class="tool-btn" :class="{ active: currentTool === 'pan' }"    @click="currentTool = 'pan'"    :title="t('pan')"><Hand :size="16" /></button>
-      <button class="tool-btn" :class="{ active: currentTool === 'rotate' }" @click="currentTool = 'rotate'" :title="t('rotateCanvas')"><RotateCcw :size="16" /></button>
-      <button class="tool-btn" @click="resetView" :title="t('resetView')"><SquareDot :size="16" /></button>
-      <button class="tool-btn" @click="zoomIn"  :title="t('zoomIn')"><ZoomIn  :size="16" /></button>
-      <button class="tool-btn" @click="zoomOut" :title="t('zoomOut')"><ZoomOut :size="16" /></button>
-
-      <!-- Sticky note -->
-      <div class="tb-sep" />
-      <button class="tool-btn" @click="addStickyNote" :title="t('addStickyNote')"><StickyNote :size="16" /></button>
+      <!-- Core toolbar buttons: order + visibility (and user-added
+           separators) are configurable from Settings → Toolbar (drag to
+           reorder, on/off to hide, separators can be added/deleted there). -->
+      <template v-for="item in visibleToolbarItems" :key="item.id">
+        <div v-if="item.kind === 'separator'" class="tb-sep" />
+        <button v-else class="tool-btn"
+          :class="[item.extraClass, { active: toolbarItemActive(item) }]"
+          :disabled="item.isDisabled?.()"
+          :ref="el => { if (item.trigger) toolbarTriggerEls[item.id] = el }"
+          @click.stop="toolbarItemClick(item)"
+          :title="t(item.labelKey)">
+          <template v-if="item.render === 'swatch'">
+            <div class="ts-fill"   :style="{ background: fillColor }" />
+            <div class="ts-stroke" :style="{ background: currentColor }" />
+          </template>
+          <component v-else :is="item.icon()" :size="16" />
+        </button>
+      </template>
 
       <!-- Selection controls (visible only when selection is active) -->
       <template v-if="selActive">
@@ -300,34 +226,18 @@
         <button class="tool-btn" @click="commitSelPaint" :title="t('selPenCommit')"><SquareDashedMousePointer :size="16" /></button>
       </template>
 
-      <!-- Layer toggle -->
-      <div class="tb-sep" />
-      <button class="tool-btn" :class="{ active: isPanelOpen }" @click="isPanelOpen = !isPanelOpen" :title="t('layersPanel')"><Layers :size="16" /></button>
-
-      <!-- Backup + Settings — pinned to bottom -->
+      <!-- Settings — always pinned to the bottom and never hideable, so
+           there's always a way back into Settings to re-show/reorder
+           anything else. -->
       <div class="tb-bottom">
         <div class="tb-sep" />
-        <button ref="backupTriggerRef" class="tool-btn" :class="{ active: backupPopupOpen }" @click.stop="toggleBackupPopup" :title="t('cloudPanel')"><CloudUpload :size="16" /></button>
-        <button ref="settingsTriggerRef" class="tool-btn" :class="{ active: settingsPopupOpen }" @click.stop="toggleSettingsPopup" :title="t('settings')"><Settings :size="16" /></button>
+        <button class="tool-btn" :class="{ active: settingsPopupOpen }" @click.stop="toggleSettingsPopup" :title="t('settings')"><Settings :size="16" /></button>
       </div>
     </aside>
     </div><!-- /.app-body -->
 
     <!-- ── All popups (Teleport to body) ─────────────── -->
     <Teleport to="body">
-      <!-- Tool selector popup -->
-      <div v-if="toolPopupOpen" class="tool-popup" :style="toolPopupStyle" @click.stop>
-        <button
-          v-for="tool in tools" :key="tool.id"
-          class="tp-item" :class="{ active: currentTool === tool.id }"
-          @click="selectTool(tool.id)"
-        >
-          <span class="tp-icon"><component :is="tool.comp" :size="16" /></span>
-          <span class="tp-label">{{ t(tool.labelKey) }}</span>
-          <span class="tp-key">{{ tool.key }}</span>
-        </button>
-      </div>
-
       <!-- Color popup -->
       <FloatingPopup
         ref="cpRef"
@@ -521,78 +431,162 @@
         </div>
       </FloatingPopup>
 
-      <!-- Settings popup -->
-      <FloatingPopup
-        ref="spRef"
-        :open="settingsPopupOpen"
-        @update:open="settingsPopupOpen = $event"
-        :title="t('settings')"
-        :zIndex="spZ"
-        @bring-to-front="bringSpToFront"
-        :width="220"
-      >
-        <template #icon><Settings :size="16" /></template>
-        <div class="sp-title">{{ t('canvasSize') }}</div>
-        <div class="csp-preset-list">
-          <div class="csp-preset-group">Social / Mobile</div>
-          <button class="csp-preset-btn" @click="newCanvasW=1080; newCanvasH=1920">1080 × 1920 <span>Stories 9:16</span></button>
-          <button class="csp-preset-btn" @click="newCanvasW=1080; newCanvasH=1350">1080 × 1350 <span>Portrait 4:5</span></button>
-          <button class="csp-preset-btn" @click="newCanvasW=1080; newCanvasH=1080">1080 × 1080 <span>Square 1:1</span></button>
-          <button class="csp-preset-btn" @click="newCanvasW=1920; newCanvasH=1080">1920 × 1080 <span>Landscape 16:9</span></button>
-          <button class="csp-preset-btn" @click="newCanvasW=1280; newCanvasH=720">1280 × 720 <span>HD 16:9</span></button>
-          <div class="csp-preset-group">Print (px @300dpi)</div>
-          <button class="csp-preset-btn" @click="newCanvasW=2480; newCanvasH=3508">2480 × 3508 <span>A4 Portrait</span></button>
-          <button class="csp-preset-btn" @click="newCanvasW=3508; newCanvasH=2480">3508 × 2480 <span>A4 Landscape</span></button>
-          <button class="csp-preset-btn" @click="newCanvasW=2551; newCanvasH=3579">2551 × 3579 <span>Letter Portrait</span></button>
-          <button class="csp-preset-btn" @click="newCanvasW=3579; newCanvasH=2551">3579 × 2551 <span>Letter Landscape</span></button>
-          <div class="csp-preset-group">Screen</div>
-          <button class="csp-preset-btn" @click="newCanvasW=1920; newCanvasH=1080">1920 × 1080 <span>FHD</span></button>
-          <button class="csp-preset-btn" @click="newCanvasW=2560; newCanvasH=1440">2560 × 1440 <span>QHD</span></button>
-          <button class="csp-preset-btn" @click="newCanvasW=3840; newCanvasH=2160">3840 × 2160 <span>4K UHD</span></button>
-          <button class="csp-preset-btn" @click="newCanvasW=2732; newCanvasH=2048">2732 × 2048 <span>iPad Pro</span></button>
-        </div>
-        <div class="csp-row">
-          <label>W</label>
-          <input type="number" v-model.number="newCanvasW" class="csp-input" min="1" max="8192"
-            @mousedown.stop @touchstart.stop />
-        </div>
-        <div class="csp-row">
-          <label>H</label>
-          <input type="number" v-model.number="newCanvasH" class="csp-input" min="1" max="8192"
-            @mousedown.stop @touchstart.stop />
-        </div>
-        <button class="csp-apply" @click="applyCanvasSize">{{ t('apply') }}</button>
-        <div class="sp-divider" />
-        <div class="sp-title">{{ t('canvasBg') }}</div>
-        <div class="sp-presets">
-          <button
-            v-for="c in bgPresets" :key="c"
-            class="sp-preset-dot"
-            :style="{ background: c, boxShadow: canvasBg === c ? '0 0 0 2px #6060cc' : 'inset 0 0 0 1px rgba(255,255,255,0.15)' }"
-            @click="canvasBg = c"
-            :title="c"
-          />
-        </div>
-        <div class="sp-custom">
-          <span class="sp-label">{{ t('custom') }}</span>
-          <input type="color" :value="canvasBg" @input="e => canvasBg = e.target.value" class="sp-picker" />
-          <span class="sp-hex">{{ canvasBg }}</span>
-        </div>
-        <div class="sp-lang">
-          <span class="sp-label">{{ t('language') }}</span>
-          <div class="sp-lang-btns">
-            <button :class="{ active: locale === 'en' }" @click="setLocale('en')">EN</button>
-            <button :class="{ active: locale === 'zh' }" @click="setLocale('zh')">中文</button>
+      <!-- Settings modal — centered, blurred backdrop, same pattern as the
+           changelog modal, with its own top-level tab bar per section. -->
+      <Transition name="guide-fade">
+        <div v-if="settingsPopupOpen" class="ipfs-guide-overlay st-overlay" @click.self="settingsPopupOpen = false" @mousedown.stop @touchstart.stop>
+          <div class="ipfs-guide-card st-card" @click.stop @mousedown.stop>
+            <div class="st-header">
+              <span class="st-header-title">{{ t('settings') }}</span>
+              <button class="ipfs-guide-close st-close" @click="settingsPopupOpen = false">✕</button>
+            </div>
+            <div class="st-tabs">
+              <button class="st-tab" :class="{ active: settingsTab === 'canvas' }"   @click="settingsTab = 'canvas'">{{ t('settingsTabCanvas') }}</button>
+              <button class="st-tab" :class="{ active: settingsTab === 'general' }"  @click="settingsTab = 'general'">{{ t('settingsTabGeneral') }}</button>
+              <button class="st-tab" :class="{ active: settingsTab === 'toolbar' }"  @click="settingsTab = 'toolbar'">{{ t('settingsTabToolbar') }}</button>
+            </div>
+            <div class="st-body">
+              <template v-if="settingsTab === 'canvas'">
+                <div class="sp-title">{{ t('canvasSize') }}</div>
+                <div class="csp-preset-list">
+                  <div class="csp-preset-group">Social / Mobile</div>
+                  <button class="csp-preset-btn" @click="newCanvasW=1080; newCanvasH=1920">1080 × 1920 <span>Stories 9:16</span></button>
+                  <button class="csp-preset-btn" @click="newCanvasW=1080; newCanvasH=1350">1080 × 1350 <span>Portrait 4:5</span></button>
+                  <button class="csp-preset-btn" @click="newCanvasW=1080; newCanvasH=1080">1080 × 1080 <span>Square 1:1</span></button>
+                  <button class="csp-preset-btn" @click="newCanvasW=1920; newCanvasH=1080">1920 × 1080 <span>Landscape 16:9</span></button>
+                  <button class="csp-preset-btn" @click="newCanvasW=1280; newCanvasH=720">1280 × 720 <span>HD 16:9</span></button>
+                  <div class="csp-preset-group">Print (px @300dpi)</div>
+                  <button class="csp-preset-btn" @click="newCanvasW=2480; newCanvasH=3508">2480 × 3508 <span>A4 Portrait</span></button>
+                  <button class="csp-preset-btn" @click="newCanvasW=3508; newCanvasH=2480">3508 × 2480 <span>A4 Landscape</span></button>
+                  <button class="csp-preset-btn" @click="newCanvasW=2551; newCanvasH=3579">2551 × 3579 <span>Letter Portrait</span></button>
+                  <button class="csp-preset-btn" @click="newCanvasW=3579; newCanvasH=2551">3579 × 2551 <span>Letter Landscape</span></button>
+                  <div class="csp-preset-group">Screen</div>
+                  <button class="csp-preset-btn" @click="newCanvasW=1920; newCanvasH=1080">1920 × 1080 <span>FHD</span></button>
+                  <button class="csp-preset-btn" @click="newCanvasW=2560; newCanvasH=1440">2560 × 1440 <span>QHD</span></button>
+                  <button class="csp-preset-btn" @click="newCanvasW=3840; newCanvasH=2160">3840 × 2160 <span>4K UHD</span></button>
+                  <button class="csp-preset-btn" @click="newCanvasW=2732; newCanvasH=2048">2732 × 2048 <span>iPad Pro</span></button>
+                </div>
+                <div class="csp-row">
+                  <label>W</label>
+                  <input type="number" v-model.number="newCanvasW" class="csp-input" min="1" max="8192"
+                    @mousedown.stop @touchstart.stop />
+                </div>
+                <div class="csp-row">
+                  <label>H</label>
+                  <input type="number" v-model.number="newCanvasH" class="csp-input" min="1" max="8192"
+                    @mousedown.stop @touchstart.stop />
+                </div>
+                <button class="csp-apply" @click="applyCanvasSize">{{ t('apply') }}</button>
+                <div class="sp-divider" />
+                <div class="sp-title">{{ t('canvasBg') }}</div>
+                <div class="sp-presets">
+                  <button
+                    v-for="c in bgPresets" :key="c"
+                    class="sp-preset-dot"
+                    :style="{ background: c, boxShadow: canvasBg === c ? '0 0 0 2px #6060cc' : 'inset 0 0 0 1px rgba(255,255,255,0.15)' }"
+                    @click="canvasBg = c"
+                    :title="c"
+                  />
+                </div>
+                <div class="sp-custom">
+                  <span class="sp-label">{{ t('custom') }}</span>
+                  <input type="color" :value="canvasBg" @input="e => canvasBg = e.target.value" class="sp-picker" />
+                  <span class="sp-hex">{{ canvasBg }}</span>
+                </div>
+              </template>
+
+              <template v-else-if="settingsTab === 'general'">
+                <div class="sp-lang">
+                  <span class="sp-label">{{ t('language') }}</span>
+                  <div class="sp-lang-btns">
+                    <button :class="{ active: locale === 'en' }" @click="setLocale('en')">EN</button>
+                    <button :class="{ active: locale === 'zh' }" @click="setLocale('zh')">中文</button>
+                  </div>
+                </div>
+                <div class="sp-lang">
+                  <span class="sp-label">{{ t('toolbarPosition') }}</span>
+                  <div class="sp-lang-btns">
+                    <button :class="{ active: toolbarSide === 'left' }"  @click="toolbarSide = 'left'">{{ t('toolbarLeft') }}</button>
+                    <button :class="{ active: toolbarSide === 'right' }" @click="toolbarSide = 'right'">{{ t('toolbarRight') }}</button>
+                  </div>
+                </div>
+              </template>
+
+              <template v-else-if="settingsTab === 'toolbar'">
+                <div class="sp-title">{{ t('settingsTabToolbar') }}</div>
+                <div class="tbl-hint">{{ t('toolbarCustomizeHint') }}</div>
+                <button class="tbl-add-btn" @click="toolbarAddOpen = !toolbarAddOpen">
+                  <Plus :size="13" /> {{ t('toolbarAdd') }}
+                </button>
+                <div v-if="toolbarAddOpen" class="tbl-add-list">
+                  <button class="tbl-add-item" @click="addToolbarSeparator">
+                    <span class="tbl-add-item-icon">┃</span> {{ t('toolbarSeparator') }}
+                  </button>
+                  <button v-for="item in hiddenToolbarItemsForAdd" :key="item.id" class="tbl-add-item" @click="setToolbarItemHidden(item.id, false)">
+                    <span class="tbl-add-item-icon"><component :is="item.icon()" :size="14" /></span> {{ t(item.labelKey) }}
+                  </button>
+                </div>
+                <div class="tbl-list">
+                  <div v-for="item in visibleToolbarItems" :key="item.id" class="tbl-row"
+                    :class="{ dragging: item.id === tblDragId, 'drag-over': item.id === tblDragOverId, 'tbl-row-sep': item.kind === 'separator' }"
+                    draggable="true"
+                    @dragstart="tblDragStart(item.id)"
+                    @dragenter.prevent="tblDragEnter(item.id)"
+                    @dragover.prevent
+                    @dragleave="tblDragLeave(item.id)"
+                    @drop="tblDrop(item.id)">
+                    <span class="tbl-handle"><GripVertical :size="14" /></span>
+                    <template v-if="item.kind === 'separator'">
+                      <span class="tbl-sep-label">{{ t('toolbarSeparator') }}</span>
+                    </template>
+                    <template v-else>
+                      <span class="tbl-icon">
+                        <template v-if="item.render === 'swatch'">
+                          <div class="ts-fill"   :style="{ background: fillColor }" />
+                          <div class="ts-stroke" :style="{ background: currentColor }" />
+                        </template>
+                        <component v-else :is="item.icon()" :size="15" />
+                      </span>
+                      <span class="tbl-name">{{ t(item.labelKey) }}</span>
+                    </template>
+                    <button class="tbl-del"
+                      @click="item.kind === 'separator' ? deleteToolbarSeparator(item.id) : setToolbarItemHidden(item.id, true)"
+                      :title="t('toolbarDeleteItem')"><Trash2 :size="14" /></button>
+                  </div>
+                </div>
+
+                <div class="sp-divider" />
+                <div class="sp-title">{{ t('toolListTitle') }}</div>
+                <div class="tbl-hint">{{ t('toolListHint') }}</div>
+                <button class="tbl-add-btn" @click="toolListAddOpen = !toolListAddOpen">
+                  <Plus :size="13" /> {{ t('toolbarAdd') }}
+                </button>
+                <div v-if="toolListAddOpen" class="tbl-add-list">
+                  <button v-for="d in hiddenToolListItemsForAdd" :key="d.id" class="tbl-add-item" @click="setToolListItemHidden(d.id, false)">
+                    <span class="tbl-add-item-icon"><component :is="d.comp" :size="14" /></span> {{ t(d.labelKey) }}
+                  </button>
+                  <div v-if="!hiddenToolListItemsForAdd.length" class="tbl-add-empty">{{ t('toolbarAddAllShown') }}</div>
+                </div>
+                <div class="tbl-list">
+                  <div v-for="d in visibleToolListItems" :key="d.id" class="tbl-row"
+                    :class="{ dragging: d.id === tlDragId, 'drag-over': d.id === tlDragOverId }"
+                    draggable="true"
+                    @dragstart="tlDragStart(d.id)"
+                    @dragenter.prevent="tlDragEnter(d.id)"
+                    @dragover.prevent
+                    @dragleave="tlDragLeave(d.id)"
+                    @drop="tlDrop(d.id)">
+                    <span class="tbl-handle"><GripVertical :size="14" /></span>
+                    <span class="tbl-icon"><component :is="d.comp" :size="15" /></span>
+                    <span class="tbl-name">{{ t(d.labelKey) }}</span>
+                    <button class="tbl-del" @click="setToolListItemHidden(d.id, true)" :title="t('toolbarDeleteItem')"><Trash2 :size="14" /></button>
+                  </div>
+                </div>
+              </template>
+            </div>
           </div>
         </div>
-        <div class="sp-lang">
-          <span class="sp-label">{{ t('toolbarPosition') }}</span>
-          <div class="sp-lang-btns">
-            <button :class="{ active: toolbarSide === 'left' }"  @click="toolbarSide = 'left'">{{ t('toolbarLeft') }}</button>
-            <button :class="{ active: toolbarSide === 'right' }" @click="toolbarSide = 'right'">{{ t('toolbarRight') }}</button>
-          </div>
-        </div>
-      </FloatingPopup>
+      </Transition>
 
       <!-- File management popup -->
       <FloatingPopup
@@ -930,28 +924,29 @@ ipfs config --json API.HTTPHeaders.Access-Control-Allow-Headers '["Authorization
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import FloatingPopup from './FloatingPopup.vue'
 import { usePaintStore } from './stores/paintStore.js'
 import { t, locale, setLocale } from './i18n.js'
 import { useView } from './composables/useView.js'
 import { useColorWheel } from './composables/useColorWheel.js'
-import { useStickyNotes } from './composables/useStickyNotes.js'
 import { useLayers } from './composables/useLayers.js'
 import {
-  Pencil, Brush, Minus, Square, Circle, PaintBucket, Pipette, Eraser,
+  Pencil, Minus, Square, Circle, PaintBucket, Pipette, Eraser,
   Trash2, Undo2, Redo2, Download, Hand, RotateCcw, SquareDot,
-  StickyNote, Layers, ChevronUp, ChevronDown, Eye, EyeOff,
-  Plus, Copy, ArrowDownToLine, X, Pen, ArrowLeftRight, Minimize2,
+  Layers, ChevronUp, ChevronDown, Eye, EyeOff,
+  Plus, Copy, ArrowDownToLine, X, Pen, ArrowLeftRight,
   ZoomIn, ZoomOut, Settings, Upload, Folder, CloudUpload,
   SquareDashedMousePointer, LassoSelect, PenLine, Paintbrush, Move, Wand2,
-  Type, Bold, Italic, Blend, Lock, Unlock
+  Type, Bold, Italic, Blend, Lock, Unlock, GripVertical
 } from 'lucide-vue-next'
 import { useIpfsBackup } from './composables/useIpfsBackup.js'
 import { isWidget, isSyncActive, isCollabSession, generateCollabSessionId } from './widgetContext.js'
 import { formatIdentityName } from './collabIdentity.js'
 import { sendRoomMessage } from './widgetApi.js'
 import { initCollabSync, participants, myIdentity, syncConnected, recentEdits, RECENT_EDIT_WINDOW_MS } from './collabSync.js'
+import { getPlugin, getPlugins } from './plugins/registry.js'
+import './plugins/builtin/index.js'
 
 // Perf instrumentation — active only on the atelier-dev test subdomain.
 const PERF_DEBUG = /atelier-dev\./.test(window.location.hostname)
@@ -960,19 +955,91 @@ const PERF_DEBUG = /atelier-dev\./.test(window.location.hostname)
 const paintStore = usePaintStore()
 
 // ── Tool definitions ──────────────────────────────────────
-const tools = [
-  { id: 'pen',          comp: Pencil,                   labelKey: 'tool_pen',          key: 'P' },
-  { id: 'brush',        comp: Brush,                    labelKey: 'tool_brush',        key: 'B' },
-  { id: 'mix',          comp: Blend,                    labelKey: 'tool_mix',          key: 'M' },
-  { id: 'line',         comp: Minus,                    labelKey: 'tool_line',         key: 'L' },
-  { id: 'rect',         comp: Square,                   labelKey: 'tool_rect',         key: 'R' },
-  { id: 'circle',       comp: Circle,                   labelKey: 'tool_circle',       key: 'C' },
-  { id: 'fill',         comp: PaintBucket,              labelKey: 'tool_fill',         key: 'F' },
-  { id: 'eyedropper',   comp: Pipette,                  labelKey: 'tool_eyedropper',   key: 'I' },
-  { id: 'eraser',       comp: Eraser,                   labelKey: 'tool_eraser',       key: 'E' },
-  { id: 'sel_pen',  comp: Paintbrush, labelKey: 'tool_sel_pen',  key: 'W' },
-  { id: 'sel_eras', comp: Eraser,     labelKey: 'tool_sel_eras', key: null },
+// pen/brush/eraser are registered as brush-type plugins (see
+// plugins/builtin/brushes.js) with `core: true` — always shown, never in
+// any removable list. Everything else that can appear in the brush
+// tool-list (the hardcoded shape/selection tools below, AND any other
+// registered non-core brush plugin, e.g. airbrush) is one combined
+// catalog the user can freely add/remove/reorder from Settings → Toolbar,
+// same pattern as the main toolbar below.
+const toggleableToolDefs = [
+  { id: 'mix',         comp: Blend,       labelKey: 'tool_mix',          key: 'M' },
+  { id: 'line',        comp: Minus,       labelKey: 'tool_line',         key: 'L' },
+  { id: 'rect',        comp: Square,      labelKey: 'tool_rect',         key: 'R' },
+  { id: 'circle',      comp: Circle,      labelKey: 'tool_circle',       key: 'C' },
+  { id: 'fill',        comp: PaintBucket, labelKey: 'tool_fill',         key: 'F' },
+  { id: 'eyedropper',  comp: Pipette,     labelKey: 'tool_eyedropper',   key: 'I' },
+  { id: 'sel_pen',     comp: Paintbrush,  labelKey: 'tool_sel_pen',      key: 'W' },
+  { id: 'sel_eras',    comp: Eraser,      labelKey: 'tool_sel_eras',     key: null },
 ]
+const toolListCatalog = computed(() => [
+  ...toggleableToolDefs,
+  ...getPlugins('brush').filter(p => !p.core && !toggleableToolDefs.some(d => d.id === p.id)),
+])
+
+const TOOLS_LAYOUT_KEY = 'atelier-tools-layout'
+function loadToolsLayout() {
+  try { return JSON.parse(localStorage.getItem(TOOLS_LAYOUT_KEY) || '{}') } catch { return {} }
+}
+// Same { order, hidden } shape as toolbarLayout below.
+const toolsLayout = reactive(loadToolsLayout())
+watch(toolsLayout, () => {
+  try { localStorage.setItem(TOOLS_LAYOUT_KEY, JSON.stringify(toolsLayout)) } catch {}
+}, { deep: true })
+
+const orderedToolListItems = computed(() => {
+  const catalog = toolListCatalog.value
+  const byId = new Map(catalog.map(i => [i.id, i]))
+  const seen = new Set()
+  const out = []
+  for (const id of toolsLayout.order || []) {
+    if (byId.has(id) && !seen.has(id)) { out.push(byId.get(id)); seen.add(id) }
+  }
+  for (const item of catalog) {
+    if (!seen.has(item.id)) out.push(item)
+  }
+  return out
+})
+function isToolListItemHidden(id) {
+  return (toolsLayout.hidden || []).includes(id)
+}
+function setToolListItemHidden(id, hidden) {
+  const set = new Set(toolsLayout.hidden || [])
+  if (hidden) set.add(id); else set.delete(id)
+  toolsLayout.hidden = [...set]
+}
+const visibleToolListItems = computed(() =>
+  orderedToolListItems.value.filter(item => !isToolListItemHidden(item.id))
+)
+const hiddenToolListItemsForAdd = computed(() =>
+  toolListCatalog.value.filter(item => isToolListItemHidden(item.id))
+)
+const toolListAddOpen = ref(false)
+const tlDragId     = ref(null)
+const tlDragOverId = ref(null)
+function tlDragStart(id) { tlDragId.value = id }
+function tlDragEnter(id) { tlDragOverId.value = id }
+function tlDragLeave(id) { if (tlDragOverId.value === id) tlDragOverId.value = null }
+function tlDrop(targetId) {
+  tlDragOverId.value = null
+  if (tlDragId.value === null || tlDragId.value === targetId) return
+  const ids = orderedToolListItems.value.map(i => i.id)
+  const from = ids.indexOf(tlDragId.value)
+  const to   = ids.indexOf(targetId)
+  if (from === -1 || to === -1) return
+  ids.splice(to, 0, ids.splice(from, 1)[0])
+  toolsLayout.order = ids
+  tlDragId.value = null
+}
+
+// pen/brush/eraser first (fixed, un-removable), then the user's ordered
+// tool-list selection.
+const tools = computed(() => [
+  getPlugin('pen'),
+  getPlugin('brush'),
+  getPlugin('eraser'),
+  ...visibleToolListItems.value,
+].filter(Boolean))
 
 // ── Tool state ────────────────────────────────────────────
 const currentTool   = ref('pen')
@@ -1002,15 +1069,37 @@ const _extraTools = {
   magic_wand: { labelKey: 'tool_magic_wand', comp: Wand2 },
   text:        { labelKey: 'tool_text',       comp: Type  },
 }
-const toolLabel       = computed(() => { const f = tools.find(x => x.id === currentTool.value) ?? _extraTools[currentTool.value]; return f ? t(f.labelKey) : '' })
-const currentToolComp = computed(() => (tools.find(x => x.id === currentTool.value) ?? _extraTools[currentTool.value])?.comp ?? Pencil)
+// Resolves a tool id against every place a "tool" can come from: the
+// tools list, the small hardcoded extras above, or a widget-as-tool
+// plugin (e.g. sticky notes — registered with `icon`/`label` instead of
+// this file's `comp`/`labelKey` convention, hence the fallback fields).
+function resolveTool(id) {
+  return tools.value.find(x => x.id === id) ?? _extraTools[id] ?? getPlugin(id)
+}
+const toolLabel       = computed(() => { const f = resolveTool(currentTool.value); return f ? t(f.labelKey ?? f.label) : '' })
+const currentToolComp = computed(() => resolveTool(currentTool.value)?.comp ?? resolveTool(currentTool.value)?.icon ?? Pencil)
 
 // Brush button tracks last used drawing tool independently from text/magic_wand
 const lastDrawTool     = ref('pen')
-const lastDrawToolComp = computed(() => tools.find(x => x.id === lastDrawTool.value)?.comp ?? Pencil)
+const lastDrawToolComp = computed(() => tools.value.find(x => x.id === lastDrawTool.value)?.comp ?? Pencil)
 watch(currentTool, newTool => {
-  if (tools.some(x => x.id === newTool)) lastDrawTool.value = newTool
+  if (tools.value.some(x => x.id === newTool)) lastDrawTool.value = newTool
   else brushPopupOpen.value = false
+})
+// Removing a tool-list entry (Settings → Toolbar) is a visibility change,
+// not a real disable — same as hiding a toolbar button, it stays fully
+// reachable (keyboard shortcut, or whatever set currentTool to it), it
+// just won't show up highlighted in `tools`. So the fallback below only
+// needs to catch a currentTool that isn't valid ANYWHERE — including
+// toolListCatalog, which still lists hidden entries — not merely "not in
+// the currently-visible list."
+watch(tools, newTools => {
+  const stillKnown = _extraTools[currentTool.value]
+    || getPlugin(currentTool.value)
+    || toolListCatalog.value.some(x => x.id === currentTool.value)
+  if (!newTools.some(x => x.id === currentTool.value) && !stillKnown) {
+    currentTool.value = newTools[0]?.id ?? 'pen'
+  }
 })
 
 // ── Color state ───────────────────────────────────────────
@@ -1091,7 +1180,6 @@ function commitType(msg) {
 function commitBody(msg) {
   return msg.replace(/^[a-z]+(\([^)]*\))?:\s*/, '')
 }
-const toolPopupOpen     = ref(false)
 const wandPopupOpen     = ref(false)
 const textPopupOpen     = ref(false)
 
@@ -1280,6 +1368,10 @@ async function copyText(text, key) {
 
 const vw = useView(canvasLogicalW, canvasLogicalH)
 const { viewX, viewY, viewR, viewZoom, fitScale, vpStyle, resetView, zoomIn, zoomOut } = vw
+// Bundled (not passed as separate props) so widget-plugin components get
+// the live refs, not an auto-unwrapped snapshot value — see the comment
+// in StickyNotesWidget.vue for why that distinction matters.
+const widgetViewRefs = { fitScale, viewR }
 
 // Convert logical canvas point to canvas-area screen coordinates
 const textScreenPos = computed(() => {
@@ -1293,24 +1385,16 @@ const textScreenPos = computed(() => {
   }
 })
 
-const sn = useStickyNotes(fitScale, viewR)
-const {
-  stickyNotes, activeNoteId, noteColors,
-  addStickyNote, deleteNote, bringToFront,
-  startDrag, startDragTouch, startResize, startResizeTouch,
-  onSnMouseMove, onSnTouchMove, onSnMouseUp,
-} = sn
+const widgetPlugins = computed(() => getPlugins('widget'))
+
+// ── Settings modal tab ──────────────────────────────────────
+const settingsTab = ref('canvas')
 
 const cw = useColorWheel({ activeColor, activeColorTarget, colorMode, colorPopupOpen, selectColor })
 const { svCanvasRef, hsvH, hsvS, hsvV, onSvDown, onSvMove, onSvUp, onSvTouchStart, onSvTouchMove, onHueInput } = cw
 
 // ── Layout refs ───────────────────────────────────────────
 const wrapperRef         = ref(null)
-const colorTriggerRef    = ref(null)
-const toolTriggerRef     = ref(null)
-const settingsTriggerRef = ref(null)
-const fileTriggerRef       = ref(null)
-const backupTriggerRef     = ref(null)
 const importInputRef       = ref(null)
 const projectInputRef      = ref(null)
 
@@ -1318,7 +1402,7 @@ const projectInputRef      = ref(null)
 const toolbarSide = ref(localStorage.getItem('paint-toolbar-side') ?? 'right')
 watch(toolbarSide, v => {
   localStorage.setItem('paint-toolbar-side', v)
-  ;[cpRef, bpRef, fpRef, spRef, bkRef].forEach(r => r.value?.reset())
+  ;[cpRef, bpRef, fpRef, bkRef].forEach(r => r.value?.reset())
 })
 
 // ── Layer panel width (persisted, drag-resizable) ──────────
@@ -1356,19 +1440,18 @@ function _onPanelResizeUp() {
 
 // ── Popup z-index ─────────────────────────────────────────
 let _popupZ = 9999
-const cpZ = ref(9999), bpZ = ref(9999), fpZ = ref(9999), spZ = ref(9999), bkZ = ref(9999)
+const cpZ = ref(9999), bpZ = ref(9999), fpZ = ref(9999), bkZ = ref(9999)
 const wdZ = ref(9999), txZ = ref(9999)
 function bringCpToFront() { cpZ.value = ++_popupZ }
 function bringBpToFront() { bpZ.value = ++_popupZ }
 function bringFpToFront() { fpZ.value = ++_popupZ }
-function bringSpToFront() { spZ.value = ++_popupZ }
 function bringBkToFront() { bkZ.value = ++_popupZ }
 function bringWdToFront() { wdZ.value = ++_popupZ }
 function bringTxToFront() { txZ.value = ++_popupZ }
 
 // ── Popup refs ────────────────────────────────────────────
 const cpRef = ref(null), bpRef = ref(null)
-const fpRef = ref(null), spRef = ref(null), bkRef = ref(null)
+const fpRef = ref(null), bkRef = ref(null)
 const wdRef = ref(null), txRef = ref(null)
 const cpWidth = ref(230)
 
@@ -1382,26 +1465,21 @@ function toggleBpTools() {
     const btn = bpToolToggleRef.value
     if (btn) {
       const r = btn.getBoundingClientRect()
-      bpDropUp.value = (window.innerHeight - r.bottom) < (tools.length * 34 + 16)
+      bpDropUp.value = (window.innerHeight - r.bottom) < (tools.value.length * 34 + 16)
     }
   }
   bpToolsExpanded.value = !bpToolsExpanded.value
 }
 
 // ── Popup toggle functions ────────────────────────────────
-const toolPopupStyle = ref({})
-
-function popupPos(triggerEl, popupW, popupH) {
-  const r = triggerEl.getBoundingClientRect()
-  const left = toolbarSide.value === 'left'
-    ? Math.min(r.right + 6, window.innerWidth - popupW - 6)
-    : Math.max(6, r.left - popupW - 6)
-  const top = Math.max(6, Math.min(r.top, window.innerHeight - popupH - 6))
-  return { position: 'fixed', top: top + 'px', left: left + 'px' }
-}
+// Trigger elements for popup-positioning, keyed by toolbar item id — the
+// old approach (one named ref per button: fileTriggerRef, colorTriggerRef,
+// ...) doesn't work once the buttons are v-for generated from a data-driven
+// list (see toolbarCatalog below), so every trigger element lands in one
+// map instead, written by the :ref callback on each rendered button.
+const toolbarTriggerEls = {}
 
 function closeAllPopups() {
-  toolPopupOpen.value     = false
   settingsPopupOpen.value = false
   filePopupOpen.value     = false
   backupPopupOpen.value   = false
@@ -1413,7 +1491,7 @@ function toggleColorPopup() {
   if (colorPopupOpen.value) { colorPopupOpen.value = false; return }
   bringCpToFront()
   closeAllPopups()
-  const r = colorTriggerRef.value.getBoundingClientRect()
+  const r = toolbarTriggerEls.color.getBoundingClientRect()
   const x = toolbarSide.value === 'left'
     ? Math.min(r.right + 6, window.innerWidth - cpWidth.value - 6)
     : Math.max(6, r.left - cpWidth.value - 6)
@@ -1422,7 +1500,7 @@ function toggleColorPopup() {
 }
 
 function toggleBrushPopup() {
-  const onDrawTool = tools.some(x => x.id === currentTool.value)
+  const onDrawTool = tools.value.some(x => x.id === currentTool.value)
   if (!onDrawTool) {
     // Not on a drawing tool → first click just switches back to last drawing tool
     currentTool.value = lastDrawTool.value
@@ -1431,7 +1509,7 @@ function toggleBrushPopup() {
   // Already on a drawing tool → toggle popup
   if (brushPopupOpen.value) { brushPopupOpen.value = false; return }
   bringBpToFront()
-  const r = toolTriggerRef.value.getBoundingClientRect()
+  const r = toolbarTriggerEls.brushSettings.getBoundingClientRect()
   const x = toolbarSide.value === 'left'
     ? Math.min(r.right + 6, window.innerWidth - 220 - 6)
     : Math.max(6, r.left - 220 - 6)
@@ -1441,9 +1519,6 @@ function toggleBrushPopup() {
   brushPopupOpen.value = true
 }
 
-const wandBtnRef = ref(null)
-const textBtnRef = ref(null)
-
 function toggleWandPopup() {
   currentTool.value = 'magic_wand'
   if (wandPopupOpen.value) { wandPopupOpen.value = false; return }
@@ -1451,7 +1526,7 @@ function toggleWandPopup() {
   closeAllPopups()
   wandPopupOpen.value = true
   nextTick(() => {
-    const r = wandBtnRef.value?.getBoundingClientRect()
+    const r = toolbarTriggerEls.tool_magic_wand?.getBoundingClientRect()
     if (!r) return
     const x = toolbarSide.value === 'left'
       ? Math.min(r.right + 6, window.innerWidth - 220 - 6)
@@ -1467,7 +1542,7 @@ function toggleTextPopup() {
   closeAllPopups()
   textPopupOpen.value = true
   nextTick(() => {
-    const r = textBtnRef.value?.getBoundingClientRect()
+    const r = toolbarTriggerEls.tool_text?.getBoundingClientRect()
     if (!r) return
     const x = toolbarSide.value === 'left'
       ? Math.min(r.right + 6, window.innerWidth - 220 - 6)
@@ -1479,29 +1554,11 @@ function toggleTextPopup() {
 function toggleSettingsPopup() {
   const wasOpen = settingsPopupOpen.value
   closeAllPopups()
-  if (!wasOpen) {
-    bringSpToFront()
-    const r = settingsTriggerRef.value.getBoundingClientRect()
-    const x = toolbarSide.value === 'left'
-      ? Math.min(r.right + 6, window.innerWidth - 220 - 6)
-      : Math.max(6, r.left - 220 - 6)
-    spRef.value?.initPos(x, Math.max(6, r.top))
-    settingsPopupOpen.value = true
-  }
-}
-
-function toggleToolPopup() {
-  const wasOpen = toolPopupOpen.value
-  closeAllPopups()
-  if (!wasOpen) {
-    toolPopupStyle.value = popupPos(toolTriggerRef.value, 160, tools.length * 38 + 8)
-    toolPopupOpen.value = true
-  }
+  if (!wasOpen) settingsPopupOpen.value = true
 }
 
 function selectTool(id) {
   currentTool.value = id
-  toolPopupOpen.value = false
 }
 
 function toggleFilePopup() {
@@ -1509,7 +1566,7 @@ function toggleFilePopup() {
   closeAllPopups()
   if (!wasOpen) {
     bringFpToFront()
-    const r = fileTriggerRef.value.getBoundingClientRect()
+    const r = toolbarTriggerEls.file.getBoundingClientRect()
     const x = toolbarSide.value === 'left'
       ? Math.min(r.right + 6, window.innerWidth - 210 - 6)
       : Math.max(6, r.left - 240 - 6)
@@ -1523,13 +1580,150 @@ function toggleBackupPopup() {
   closeAllPopups()
   if (!wasOpen) {
     bringBkToFront()
-    const r = backupTriggerRef.value.getBoundingClientRect()
+    const r = toolbarTriggerEls.cloudPanel.getBoundingClientRect()
     const x = toolbarSide.value === 'left'
       ? Math.min(r.right + 6, window.innerWidth - 260 - 6)
       : Math.max(6, r.left - 260 - 6)
     bkRef.value?.initPos(x, Math.max(6, r.top))
     backupPopupOpen.value = true
   }
+}
+
+// ── Toolbar customization ───────────────────────────────────
+// The core toolbar buttons (file, brush settings, color, undo/redo, tools,
+// view controls, layers panel, cloud panel) are data-driven so Settings →
+// Toolbar can let the user hide and reorder them. Widget plugins (sticky
+// notes etc.) and Settings itself are NOT in this catalog — plugins have
+// their own on/off in Settings → Plugins. Settings itself stays pinned so
+// there's always a way back into these controls, and is NOT in this
+// catalog either. Widget plugins (sticky notes, ...) ARE merged in below
+// via combinedToolbarCatalog — they can be dragged/hidden alongside the
+// built-ins, but whether the plugin exists at all is still Plugins tab's
+// job, not this one's.
+const toolbarCatalog = [
+  { id: 'file', labelKey: 'fileManagement', icon: () => Folder, trigger: true,
+    onClick: () => toggleFilePopup(), isActive: () => filePopupOpen.value },
+  { id: 'brushSettings', labelKey: 'brushSettings', icon: () => lastDrawToolComp.value, trigger: true, extraClass: 'tool-selector',
+    onClick: () => toggleBrushPopup(), isActive: () => tools.value.some(x => x.id === currentTool.value) },
+  { id: 'color', labelKey: 'colorSettings', render: 'swatch', trigger: true, extraClass: 'color-trigger',
+    onClick: () => toggleColorPopup(), isActive: () => colorPopupOpen.value },
+  { id: 'undo', labelKey: 'undo', icon: () => Undo2,
+    onClick: () => undo(), isDisabled: () => historyIndex.value <= 0 },
+  { id: 'redo', labelKey: 'redo', icon: () => Redo2,
+    onClick: () => redo(), isDisabled: () => historyIndex.value >= history.value.length - 1 },
+  { id: 'tool_move', labelKey: 'tool_move', icon: () => Move, toolId: 'move' },
+  { id: 'tool_select_rect', labelKey: 'tool_select_rect', icon: () => SquareDashedMousePointer, toolId: 'select_rect' },
+  { id: 'tool_lasso', labelKey: 'tool_lasso', icon: () => LassoSelect, toolId: 'lasso' },
+  { id: 'tool_magic_wand', labelKey: 'tool_magic_wand', icon: () => Wand2, trigger: true,
+    onClick: () => toggleWandPopup(), isActive: () => currentTool.value === 'magic_wand' },
+  { id: 'tool_text', labelKey: 'tool_text', icon: () => Type, trigger: true,
+    onClick: () => toggleTextPopup(), isActive: () => currentTool.value === 'text' },
+  { id: 'pan', labelKey: 'pan', icon: () => Hand, toolId: 'pan' },
+  { id: 'rotate', labelKey: 'rotateCanvas', icon: () => RotateCcw, toolId: 'rotate' },
+  { id: 'resetView', labelKey: 'resetView', icon: () => SquareDot, onClick: () => resetView() },
+  { id: 'zoomIn', labelKey: 'zoomIn', icon: () => ZoomIn, onClick: () => zoomIn() },
+  { id: 'zoomOut', labelKey: 'zoomOut', icon: () => ZoomOut, onClick: () => zoomOut() },
+  { id: 'layersPanel', labelKey: 'layersPanel', icon: () => Layers,
+    onClick: () => { isPanelOpen.value = !isPanelOpen.value }, isActive: () => isPanelOpen.value },
+  { id: 'cloudPanel', labelKey: 'cloudPanel', icon: () => CloudUpload, trigger: true,
+    onClick: () => toggleBackupPopup(), isActive: () => backupPopupOpen.value },
+]
+
+// Widget plugins reuse the exact same item contract (toolId for an
+// asTool plugin, onClick otherwise) as the built-ins above, adapted from
+// their own manifest fields (label/icon instead of labelKey/icon()).
+const combinedToolbarCatalog = computed(() => [
+  ...toolbarCatalog,
+  ...widgetPlugins.value.map(p => ({
+    id: p.id,
+    labelKey: p.label,
+    icon: () => p.icon,
+    toolId: p.asTool ? p.id : undefined,
+    onClick: p.asTool ? undefined : () => p.primaryAction?.(),
+  })),
+])
+
+function toolbarItemClick(item) {
+  if (item.toolId) currentTool.value = item.toolId
+  else item.onClick?.()
+}
+function toolbarItemActive(item) {
+  if (item.toolId) return currentTool.value === item.toolId
+  return item.isActive?.() ?? false
+}
+
+const TOOLBAR_LAYOUT_KEY = 'atelier-toolbar-layout'
+function loadToolbarLayout() {
+  try { return JSON.parse(localStorage.getItem(TOOLBAR_LAYOUT_KEY) || '{}') } catch { return {} }
+}
+// { order: [ids in display order], hidden: [ids not shown] }. An id from
+// toolbarCatalog missing from `order` (a newly added built-in button)
+// falls in at the end automatically — see orderedToolbarItems below. A
+// user-added separator is just an id in `order` prefixed "sep-" that
+// isn't in toolbarCatalog at all — orderedToolbarItems synthesizes a
+// { kind: 'separator' } item for those, so no separate list to keep in
+// sync is needed; deleting one is just removing its id from `order`.
+const toolbarLayout = reactive(loadToolbarLayout())
+watch(toolbarLayout, () => {
+  try { localStorage.setItem(TOOLBAR_LAYOUT_KEY, JSON.stringify(toolbarLayout)) } catch {}
+}, { deep: true })
+
+const orderedToolbarItems = computed(() => {
+  const catalog = combinedToolbarCatalog.value
+  const byId = new Map(catalog.map(i => [i.id, i]))
+  const seen = new Set()
+  const out = []
+  for (const id of toolbarLayout.order || []) {
+    if (seen.has(id)) continue
+    if (byId.has(id)) { out.push(byId.get(id)); seen.add(id) }
+    else if (id.startsWith('sep-')) { out.push({ id, kind: 'separator', labelKey: 'toolbarSeparator' }); seen.add(id) }
+  }
+  for (const item of catalog) {
+    if (!seen.has(item.id)) out.push(item)
+  }
+  return out
+})
+const visibleToolbarItems = computed(() =>
+  orderedToolbarItems.value.filter(item => !(toolbarLayout.hidden || []).includes(item.id))
+)
+function isToolbarItemHidden(id) {
+  return (toolbarLayout.hidden || []).includes(id)
+}
+function setToolbarItemHidden(id, hidden) {
+  const set = new Set(toolbarLayout.hidden || [])
+  if (hidden) set.add(id); else set.delete(id)
+  toolbarLayout.hidden = [...set]
+}
+function addToolbarSeparator() {
+  const id = `sep-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  toolbarLayout.order = [...orderedToolbarItems.value.map(i => i.id), id]
+}
+function deleteToolbarSeparator(id) {
+  toolbarLayout.order = orderedToolbarItems.value.map(i => i.id).filter(x => x !== id)
+}
+// Items not currently shown — what the "Add" picker in Settings → Toolbar
+// offers. Removing something just hides it (setToolbarItemHidden); it
+// stays in combinedToolbarCatalog so it can always be added back here.
+const hiddenToolbarItemsForAdd = computed(() =>
+  combinedToolbarCatalog.value.filter(item => isToolbarItemHidden(item.id))
+)
+const toolbarAddOpen = ref(false)
+
+const tblDragId    = ref(null)
+const tblDragOverId = ref(null)
+function tblDragStart(id) { tblDragId.value = id }
+function tblDragEnter(id) { tblDragOverId.value = id }
+function tblDragLeave(id) { if (tblDragOverId.value === id) tblDragOverId.value = null }
+function tblDrop(targetId) {
+  tblDragOverId.value = null
+  if (tblDragId.value === null || tblDragId.value === targetId) return
+  const ids = orderedToolbarItems.value.map(i => i.id)
+  const from = ids.indexOf(tblDragId.value)
+  const to   = ids.indexOf(targetId)
+  if (from === -1 || to === -1) return
+  ids.splice(to, 0, ids.splice(from, 1)[0])
+  toolbarLayout.order = ids
+  tblDragId.value = null
 }
 
 // ── Canvas size dialog ────────────────────────────────────
@@ -2481,8 +2675,9 @@ let startY        = 0
 let strokePoints  = []  // accumulated points of an in-progress freehand stroke
 let layerSnapshot = null
 let drawingButton = 0
-let strokeCanvas  = null  // temp canvas for masked pen/brush/eraser strokes
+let strokeCanvas  = null  // temp canvas for masked brush-plugin strokes
 let maskCache     = null  // effective mask canvas cached per stroke
+let brushStampLast = null // last stamp position, for 'stamp'-mode brush plugins
 
 // ── Mix (smudge) tool state ────────────────────────────────
 let mixBuf      = null  // "carried" paint sampled under the brush, updated as the stroke moves
@@ -2615,6 +2810,74 @@ function activeDrawColor() {
 function getActiveCtx() {
   if (selDrawMode.value && selFloat) return selFloat.canvas.getContext('2d')
   return activeLayer.value?.canvas.getContext('2d') ?? null
+}
+
+// ── Brush plugin stroke runner ──────────────────────────────
+// Generic driver for any registry plugin with type: 'brush' (see
+// plugins/builtin/brushes.js for the plugin contract). Owns everything a
+// brush plugin shouldn't have to reimplement itself: snapshot/restore,
+// selection-mask clipping, and compositeOperation (source-over vs
+// destination-out for erasers) — a plugin's paint()/stamp() only ever
+// draws in plain source-over onto whatever ctx it's handed.
+function brushSettings() {
+  return { color: activeDrawColor(), lineWidth: lineWidth.value, opacity: strokeOpacity.value / 100 }
+}
+
+function isMasked() {
+  return selActive.value && (selRect.value || selMaskCanvas)
+}
+
+// 'path'-mode: replays the whole accumulated path from a clean snapshot.
+function renderBrushPath(plugin, points) {
+  const settings = brushSettings()
+  const ctx = getActiveCtx()
+  ctx.putImageData(layerSnapshot, 0, 0)
+
+  if (isMasked() && strokeCanvas) {
+    const { width: lw, height: lh } = activeLayer.value.canvas
+    const sctx = strokeCanvas.getContext('2d')
+    sctx.clearRect(0, 0, lw, lh)
+    sctx.globalCompositeOperation = 'source-over'
+    plugin.paint(sctx, points, settings)
+    if (maskCache) {
+      sctx.globalCompositeOperation = 'destination-in'
+      sctx.drawImage(maskCache, 0, 0)
+    }
+    ctx.globalCompositeOperation = plugin.blend || 'source-over'
+    ctx.drawImage(strokeCanvas, 0, 0)
+  } else {
+    ctx.globalCompositeOperation = plugin.blend || 'source-over'
+    plugin.paint(ctx, points, settings)
+  }
+  ctx.globalCompositeOperation = 'source-over'
+}
+
+// 'stamp'-mode: one dab, accumulating directly rather than replaying.
+// Masked case accumulates dabs onto strokeCanvas (never cleared mid-stroke)
+// so every stamp still re-applies the whole stroke-so-far through the mask
+// — a lingering cursor keeps building density under the mask exactly like
+// it would unmasked.
+function stampBrush(plugin, point) {
+  const settings = brushSettings()
+  const ctx = getActiveCtx()
+
+  if (isMasked() && strokeCanvas) {
+    const { width: lw, height: lh } = activeLayer.value.canvas
+    const sctx = strokeCanvas.getContext('2d')
+    sctx.globalCompositeOperation = 'source-over'
+    plugin.stamp(sctx, point, settings)
+    const tmp = mkCanvas(lw, lh)
+    const tc = tmp.getContext('2d')
+    tc.drawImage(strokeCanvas, 0, 0)
+    if (maskCache) { tc.globalCompositeOperation = 'destination-in'; tc.drawImage(maskCache, 0, 0) }
+    ctx.putImageData(layerSnapshot, 0, 0)
+    ctx.globalCompositeOperation = plugin.blend || 'source-over'
+    ctx.drawImage(tmp, 0, 0)
+  } else {
+    ctx.globalCompositeOperation = plugin.blend || 'source-over'
+    plugin.stamp(ctx, point, settings)
+  }
+  ctx.globalCompositeOperation = 'source-over'
 }
 
 function applyStyle(ctx) {
@@ -2762,6 +3025,10 @@ function onPointerDown(e) {
   if (currentTool.value === 'magic_wand') { handleMagicWandDown(p, e.shiftKey);   return }
   if (currentTool.value === 'text')       { handleTextDown(p);                     return }
 
+  // ── Widget-as-tool plugins (e.g. sticky notes): place at the click point ──
+  const widgetTool = getPlugin(currentTool.value)
+  if (widgetTool?.type === 'widget' && widgetTool.asTool) { widgetTool.placeAt?.(p.x, p.y); return }
+
   if (currentTool.value === 'fill') {
     if (selDrawMode.value && selFloat && selMaskCanvas) {
       // selDrawMode: fill on float canvas, then mask to colored region
@@ -2790,14 +3057,24 @@ function onPointerDown(e) {
   layerSnapshot = ctx.getImageData(0, 0, lw, lh)
 
   const masked = selActive.value && (selRect.value || selMaskCanvas)
-  const isFreehand = currentTool.value === 'pen' || currentTool.value === 'brush' || currentTool.value === 'eraser'
+  const brushPlugin = getPlugin(currentTool.value)
+  const isBrush = brushPlugin?.type === 'brush'
 
-  if (isFreehand) strokePoints = [{ x: p.x, y: p.y }]
+  if (isBrush) {
+    strokePoints = [{ x: p.x, y: p.y }]
+    brushStampLast = { x: p.x, y: p.y }
+  }
 
-  if (masked && isFreehand) {
+  if (masked && isBrush) {
     // 遮罩模式：在 strokeCanvas 上累積筆跡，避免 clip() 破壞路徑
     maskCache    = getEffectiveMask()
     strokeCanvas = mkCanvas(lw, lh)
+  }
+
+  if (isBrush && brushPlugin.mode === 'stamp') {
+    // A single click with no move should still leave a mark.
+    stampBrush(brushPlugin, p)
+    requestComposite(activeLayerId.value)
   }
 }
 
@@ -2850,70 +3127,22 @@ function _onPointerMoveInner(e) {
 
   const ctx    = getActiveCtx()
   const masked = selActive.value && (selRect.value || selMaskCanvas)
-  const { width: lw, height: lh } = activeLayer.value.canvas
+  const brushPlugin = getPlugin(currentTool.value)
 
-  // ── 遮罩 + 自由筆跡（pen/brush/eraser）：strokeCanvas 模式 ──────────
-  if (strokeCanvas && masked) {
-    strokePoints.push({ x: p.x, y: p.y })
-    const sctx = strokeCanvas.getContext('2d')
-    sctx.clearRect(0, 0, lw, lh)
-    if (currentTool.value === 'eraser') {
-      // 橡皮擦：在 strokeCanvas 畫不透明白色標記，最後用 destination-out 套用
-      sctx.strokeStyle = '#ffffff'; sctx.fillStyle = '#ffffff'
-      sctx.lineWidth = lineWidth.value * 3; sctx.lineCap = 'round'; sctx.lineJoin = 'round'
-    } else {
-      applyStyle(sctx)
-      if (currentTool.value === 'brush') {
-        sctx.lineWidth   = lineWidth.value * 3
-        sctx.globalAlpha = (strokeOpacity.value / 100) * 0.4
+  if (brushPlugin?.type === 'brush') {
+    if (brushPlugin.mode === 'stamp') {
+      const spacing = brushPlugin.stampSpacing ?? 4
+      const dx = p.x - brushStampLast.x, dy = p.y - brushStampLast.y
+      const dist  = Math.hypot(dx, dy)
+      const steps = Math.max(1, Math.round(dist / spacing))
+      for (let i = 1; i <= steps; i++) {
+        stampBrush(brushPlugin, { x: brushStampLast.x + dx * i / steps, y: brushStampLast.y + dy * i / steps })
       }
-    }
-    // 每次都從頭重畫完整路徑（單一 stroke 呼叫），避免逐段疊加造成接點變深或出現圓點
-    sctx.beginPath()
-    sctx.moveTo(strokePoints[0].x, strokePoints[0].y)
-    for (let i = 1; i < strokePoints.length; i++) sctx.lineTo(strokePoints[i].x, strokePoints[i].y)
-    sctx.stroke()
-
-    // 把 strokeCanvas 套上 mask，只保留選取區內的像素
-    const tmp = mkCanvas(lw, lh)
-    const tc  = tmp.getContext('2d')
-    tc.drawImage(strokeCanvas, 0, 0)
-    if (maskCache) {
-      tc.globalCompositeOperation = 'destination-in'
-      tc.drawImage(maskCache, 0, 0)
-    }
-
-    // 從 snapshot 還原，再把遮罩後的筆跡合併
-    ctx.putImageData(layerSnapshot, 0, 0)
-    if (currentTool.value === 'eraser') {
-      ctx.globalCompositeOperation = 'destination-out'
-      ctx.drawImage(tmp, 0, 0)
-      ctx.globalCompositeOperation = 'source-over'
+      brushStampLast = { x: p.x, y: p.y }
     } else {
-      ctx.drawImage(tmp, 0, 0)
+      strokePoints.push({ x: p.x, y: p.y })
+      renderBrushPath(brushPlugin, strokePoints)
     }
-    requestComposite(activeLayerId.value)
-    return
-  }
-
-  if (currentTool.value === 'pen' || currentTool.value === 'brush' || currentTool.value === 'eraser') {
-    strokePoints.push({ x: p.x, y: p.y })
-    // 每次都從乾淨的 snapshot 重畫完整路徑（單一 stroke 呼叫），
-    // 避免逐段疊加造成接點透明度加深或出現圓點
-    ctx.putImageData(layerSnapshot, 0, 0)
-    applyStyle(ctx)
-    if (currentTool.value === 'brush') {
-      ctx.lineWidth   = lineWidth.value * 3
-      ctx.globalAlpha = (strokeOpacity.value / 100) * 0.4
-    } else if (currentTool.value === 'eraser') {
-      ctx.globalCompositeOperation = 'destination-out'
-      ctx.globalAlpha = 1; ctx.lineWidth = lineWidth.value * 3
-    }
-    ctx.beginPath()
-    ctx.moveTo(strokePoints[0].x, strokePoints[0].y)
-    for (let i = 1; i < strokePoints.length; i++) ctx.lineTo(strokePoints[i].x, strokePoints[i].y)
-    ctx.stroke()
-    if (currentTool.value === 'eraser') ctx.globalCompositeOperation = 'source-over'
     requestComposite(activeLayerId.value)
   } else if (layerSnapshot) {
     ctx.putImageData(layerSnapshot, 0, 0)
@@ -3001,7 +3230,7 @@ function _onPointerUpInner() {
   if (!drawing) return
   drawing = false
   layerSnapshot = null
-  strokeCanvas = null; maskCache = null; strokePoints = []
+  strokeCanvas = null; maskCache = null; strokePoints = []; brushStampLast = null
   const ctx = getActiveCtx()
   if (ctx) {
     ctx.closePath()
@@ -3034,7 +3263,7 @@ function onTouchMove(e)  {
 function onTouchEnd() { onPointerUp() }
 
 // ── Keyboard ──────────────────────────────────────────────
-const keyMap = { p:'pen', b:'brush', m:'mix', l:'line', r:'rect', c:'circle', f:'fill', i:'eyedropper', e:'eraser', h:'pan', v:'move', s:'select_rect', q:'lasso', w:'sel_pen', g:'magic_wand', t:'text' }
+const keyMap = { p:'pen', b:'brush', a:'airbrush', m:'mix', l:'line', r:'rect', c:'circle', f:'fill', i:'eyedropper', e:'eraser', h:'pan', v:'move', s:'select_rect', q:'lasso', w:'sel_pen', g:'magic_wand', t:'text' }
 
 function onKey(e) {
   // Block all shortcuts while text tool is active or text box is open
@@ -3081,20 +3310,12 @@ onMounted(async () => {
   window.addEventListener('keydown',   onKey)
   document.addEventListener('click',   closeAllPopups)
   document.addEventListener('contextmenu', e => e.preventDefault())
-  window.addEventListener('mousemove', onSnMouseMove)
-  window.addEventListener('mouseup',   onSnMouseUp)
-  window.addEventListener('touchmove', onSnTouchMove, { passive: false })
-  window.addEventListener('touchend',  onSnMouseUp)
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize',    onResize)
   window.removeEventListener('keydown',   onKey)
   document.removeEventListener('click',   closeAllPopups)
-  window.removeEventListener('mousemove', onSnMouseMove)
-  window.removeEventListener('mouseup',   onSnMouseUp)
-  window.removeEventListener('touchmove', onSnTouchMove)
-  window.removeEventListener('touchend',  onSnMouseUp)
   if (nowTickTimer) clearInterval(nowTickTimer)
 })
 </script>
@@ -3375,120 +3596,6 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-/* ── Sticky notes ────────────────────────────────────── */
-.sticky-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 10;
-}
-
-.sticky-note {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  border-radius: 5px;
-  box-shadow: 3px 5px 14px rgba(0,0,0,0.4);
-  pointer-events: all;
-  min-width: 120px;
-  min-height: 80px;
-  touch-action: manipulation;
-}
-.sticky-note.sn-active {
-  box-shadow: 3px 5px 20px rgba(0,0,0,0.6), 0 0 0 2px rgba(96,96,204,0.6);
-}
-
-.sn-header {
-  display: flex;
-  align-items: center;
-  padding: 4px 6px;
-  cursor: grab;
-  flex-shrink: 0;
-  background: rgba(0,0,0,0.1);
-  border-radius: 5px 5px 0 0;
-  gap: 4px;
-}
-.sn-header:active { cursor: grabbing; }
-
-.sn-colors { display: flex; gap: 3px; }
-.sn-color-dot {
-  width: 12px; height: 12px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(0,0,0,0.2);
-  cursor: pointer; padding: 0;
-  transition: transform 0.1s;
-}
-.sn-color-dot:hover { transform: scale(1.35); }
-
-.sn-btns { display: flex; gap: 3px; flex-shrink: 0; margin-left: auto; }
-
-.sn-minimize, .sn-close {
-  width: 18px; height: 18px;
-  border: none;
-  background: rgba(0,0,0,0.12);
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 11px;
-  color: #333;
-  display: flex; align-items: center; justify-content: center;
-  padding: 0; flex-shrink: 0;
-}
-.sn-minimize:hover { background: rgba(0,0,0,0.22); }
-.sn-close:hover { background: rgba(200,50,50,0.4); color: #fff; }
-
-.sticky-note.sn-minimized {
-  min-width: 0; min-height: 0;
-  border-radius: 9px;
-  overflow: visible;
-}
-
-.sn-mini-body {
-  width: 100%; height: 100%;
-  border-radius: 9px;
-  display: flex; align-items: center; justify-content: center;
-  cursor: grab;
-}
-.sn-mini-body:active { cursor: grabbing; }
-
-.sn-mini-close {
-  position: absolute;
-  top: -6px; right: -6px;
-  width: 16px; height: 16px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(0,0,0,0.55);
-  color: #fff;
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  padding: 0;
-}
-.sn-mini-close:hover { background: rgba(200,50,50,0.85); }
-
-.sn-text {
-  flex: 1;
-  border: none;
-  background: transparent;
-  resize: none;
-  padding: 6px 8px;
-  font-size: 16px;   /* ≥16px 避免 iOS 在 focus 時自動放大 viewport */
-  font-family: inherit;
-  color: #333;
-  outline: none;
-  box-shadow: none;
-  -webkit-box-shadow: none;
-  cursor: text;
-  line-height: 1.5;
-}
-
-.sn-resize {
-  position: absolute;
-  bottom: 0; right: 0;
-  width: 14px; height: 14px;
-  cursor: se-resize;
-  background: rgba(0,0,0,0.15);
-  border-radius: 2px 0 5px 0;
-  flex-shrink: 0;
-}
 
 .draw-canvas {
   display: block;
@@ -3784,51 +3891,6 @@ input:focus, textarea:focus, select:focus {
 button:focus-visible {
   outline: 2px solid #6060cc;
   outline-offset: 1px;
-}
-
-/* ── Tool popup ─────────────────────────────────────── */
-.tool-popup {
-  position: fixed;
-  z-index: 9999;
-  background: #111111;
-  border: 1px solid #2a2a2a;
-  border-radius: 10px;
-  padding: 4px;
-  box-shadow: 0 8px 28px rgba(0,0,0,0.7);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 150px;
-  user-select: none;
-}
-
-.tp-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: none;
-  color: #cccccc;
-  cursor: pointer;
-  width: 100%;
-  text-align: left;
-  transition: background 0.12s;
-}
-.tp-item:hover { background: #1c1c1c; }
-.tp-item.active { background: #252525; border-color: #6060cc; }
-
-.tp-icon  { width: 22px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.tp-label { flex: 1; font-size: 13px; }
-.tp-key {
-  font-size: 10px;
-  color: #666666;
-  background: #161616;
-  border: 1px solid #2a2a2a;
-  border-radius: 3px;
-  padding: 1px 5px;
-  flex-shrink: 0;
 }
 
 /* ── Color popup floating mini swatches ──────────────── */
@@ -4304,7 +4366,64 @@ button:focus-visible {
 }
 .csp-apply:hover { background: #5050cc; }
 
-/* ── Settings popup ──────────────────────────────────── */
+/* ── Settings modal ─────────────────────────────────── */
+.st-overlay { z-index: 99996; }
+.st-card {
+  max-width: 420px;
+  width: calc(100vw - 32px);
+  max-height: 85vh;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.st-header {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 14px 16px 10px 20px;
+}
+.st-header-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #dddddd;
+  flex: 1;
+}
+.st-close {
+  /* .ipfs-guide-close (base class) absolutely positions this in the
+     corner of the whole card — put it back in normal flow so it sits in
+     the header's flex row next to the title instead. */
+  position: static;
+  flex-shrink: 0;
+}
+.st-tabs {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 10px 20px 0;
+  border-bottom: 1px solid #2a2a2a;
+}
+.st-tab {
+  padding: 7px 14px;
+  border: none;
+  background: none;
+  color: #888888;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+}
+.st-tab:hover { color: #cccccc; }
+.st-tab.active { color: #ffffff; border-bottom-color: #6060cc; }
+.st-body {
+  padding: 18px 20px 20px;
+  overflow-y: auto;
+  /* Roughly the tallest tab's (Canvas) natural height — keeps shorter tabs
+     (General, Plugins) from making the whole card visibly shrink/jump
+     every time you switch tabs. */
+  min-height: 400px;
+}
+
 .sp-title {
   font-size: 11px;
   color: #888888;
@@ -4334,8 +4453,8 @@ button:focus-visible {
   gap: 8px;
 }
 .sp-label {
-  font-size: 11px;
-  color: #888888;
+  font-size: 12px;
+  color: #aaaaaa;
   flex-shrink: 0;
 }
 .sp-picker {
@@ -4363,11 +4482,13 @@ button:focus-visible {
 .sp-lang {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid #2a2a3a;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #1a1a24;
 }
+.sp-lang + .sp-lang { margin-top: 8px; }
 .sp-lang-btns {
   display: flex;
   gap: 4px;
@@ -4384,6 +4505,130 @@ button:focus-visible {
 }
 .sp-lang-btns button:hover { background: #2a2a3a; color: #cccccc; }
 .sp-lang-btns button.active { background: #6060cc; border-color: #6060cc; color: #ffffff; }
+
+/* ── Toolbar customization (inside Settings popup) ─────── */
+.tbl-hint {
+  font-size: 11px;
+  color: #777777;
+  margin-bottom: 10px;
+}
+.tbl-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  border: 1px dashed #3a3a4a;
+  border-radius: 6px;
+  background: none;
+  color: #8888cc;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tbl-add-btn:hover { background: #1a1a24; border-color: #6060cc; color: #9090ff; }
+.tbl-add-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+  padding: 6px;
+  border-radius: 8px;
+  background: #101018;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.tbl-add-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: #cccccc;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.tbl-add-item:hover { background: #22223a; }
+.tbl-add-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: #9090cc;
+  flex-shrink: 0;
+}
+.tbl-add-empty {
+  font-size: 11px;
+  color: #666666;
+  padding: 6px 8px;
+}
+.tbl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tbl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #1a1a24;
+  cursor: grab;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: outline-color 0.1s, background 0.1s;
+}
+.tbl-row.dragging { opacity: 0.4; }
+.tbl-row.drag-over { outline-color: #6060cc; background: #22223a; }
+.tbl-row:active { cursor: grabbing; }
+.tbl-row-sep { background: #15151d; }
+.tbl-handle {
+  display: flex;
+  align-items: center;
+  color: #666666;
+  flex-shrink: 0;
+}
+.tbl-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 16px;
+  height: 16px;
+  color: #aaaaaa;
+  flex-shrink: 0;
+}
+.tbl-icon .ts-fill, .tbl-icon .ts-stroke { width: 9px; height: 9px; }
+.tbl-name {
+  font-size: 12px;
+  color: #dddddd;
+  flex: 1;
+}
+.tbl-sep-label {
+  flex: 1;
+  font-size: 11px;
+  color: #666666;
+  font-style: italic;
+}
+.tbl-del {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: #886060;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s, color 0.12s;
+}
+.tbl-del:hover { background: rgba(200,50,50,0.2); color: #ff8080; }
 
 /* ── File management popup ───────────────────────────────── */
 .fp-section {

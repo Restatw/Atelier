@@ -7,12 +7,15 @@ export function useStickyNotes(fitScale, viewR) {
   const activeNoteId = ref(null)
   const noteColors   = ['#fef08a','#86efac','#93c5fd','#f9a8d4','#fca5a5','#d8b4fe']
 
-  function addStickyNote() {
+  // (x, y) is a click point in canvas-vp local space — the same coordinate
+  // system canvasPoint() in App.vue produces, which is what note.x/note.y
+  // are already stored in (see onSnMouseMove below, which drags notes in
+  // that same rotate/scale-corrected space). Centers the note on the
+  // click point, same convention as a brush stamping under the cursor.
+  function addStickyNoteAt(x, y) {
     const w = 180, h = 140
-    const x = Math.round((window.innerWidth  - w) / 2)
-    const y = Math.round((window.innerHeight - h) / 2)
     stickyNotes.value.push({
-      id: ++snIdSeq, x, y, w, h,
+      id: ++snIdSeq, x: Math.round(x - w / 2), y: Math.round(y - h / 2), w, h,
       text: '', color: '#fef08a', z: ++snZSeq, minimized: false
     })
     activeNoteId.value = snIdSeq
@@ -66,7 +69,7 @@ export function useStickyNotes(fitScale, viewR) {
 
   return {
     stickyNotes, activeNoteId, noteColors,
-    addStickyNote, deleteNote, bringToFront,
+    addStickyNoteAt, deleteNote, bringToFront,
     startDrag, startDragTouch, startResize, startResizeTouch,
     onSnMouseMove, onSnTouchMove, onSnMouseUp,
   }
