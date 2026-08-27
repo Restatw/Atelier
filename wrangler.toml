@@ -19,6 +19,17 @@ routes = [
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# A request matching a static asset (including "/" resolving to index.html
+# via the SPA fallback) is served directly, bypassing the Worker's fetch
+# handler entirely, unless run_worker_first says otherwise. Needed so the
+# Worker's re95.org-vs-atelier.re95.org landing-page routing (see
+# worker.js) actually gets a chance to run for "/" instead of the asset
+# handler serving index.html directly. Scoping this to just "/" via the
+# glob-pattern array form (e.g. run_worker_first = ["/"]) turned out to
+# also affect other paths' asset-bypass behavior under `wrangler dev
+# --local` in a way the docs don't fully specify — `true` (every request)
+# is unambiguous and the per-request check in worker.js is cheap either way.
+run_worker_first = true
 
 [[durable_objects.bindings]]
 name = "SYNC_ROOM"

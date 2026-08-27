@@ -5,6 +5,13 @@
  *   forwarded to a SyncRoom Durable Object (one instance per room).
  * /og?cid=...&thumb=... — OG preview page (no static asset, Worker always runs)
  *   Bots get OG meta tags; browsers get meta-refresh to the actual app.
+ * / on re95.org / www.re95.org (no cid/widgetId/matrix_room_id) — static
+ *   marketing landing page (public/landing.html) instead of the app itself.
+ *   atelier.re95.org is unaffected — it's the explicit "launch the app"
+ *   destination the landing page links to. Query-param exceptions matter:
+ *   a shared IPFS link's /og redirect (below) lands on `/?cid=...`, and
+ *   collab/widget embeds read their own ids from the query string too, so
+ *   those must still reach the SPA rather than the landing page.
  *
  * Everything else — static assets (dist/)
  */
@@ -13,6 +20,8 @@ export { SyncRoom } from './syncRoom.js'
 
 const THUMB_GW = 'https://gateway.pinata.cloud/ipfs'
 const SYNC_PATH_PREFIX = '/sync/'
+const LANDING_HOSTS = new Set(['re95.org', 'www.re95.org'])
+const LANDING_EXEMPT_PARAMS = ['cid', 'widgetId', 'matrix_room_id']
 
 export default {
   async fetch(request, env) {
@@ -23,6 +32,17 @@ export default {
       if (!roomId) return new Response('missing room id', { status: 400 })
       const stub = env.SYNC_ROOM.getByName(roomId)
       return stub.fetch(request)
+    }
+
+    if (
+      LANDING_HOSTS.has(url.hostname) &&
+      url.pathname === '/' &&
+      !LANDING_EXEMPT_PARAMS.some(p => url.searchParams.has(p))
+    ) {
+      // Cloudflare's asset handler serves .html files at their extension-
+      // less "clean URL" and 307-redirects the .html form to it — request
+      // that form directly rather than following a redirect.
+      return env.ASSETS.fetch(new Request(new URL('/landing', url), request))
     }
 
     if (url.pathname !== '/og') {

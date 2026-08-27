@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en" data-lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Atelier — Draw together, anywhere</title>
+<meta name="description" content="Atelier is a free, open-source browser painting app with layers, live collaboration, and IPFS backup — no install required." />
+<link rel="icon" href="/icon.svg" type="image/svg+xml" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Atelier" />
+<meta property="og:title" content="Atelier — Draw together, anywhere" />
+<meta property="og:description" content="A free, open-source browser painting app with layers, live collaboration, and IPFS backup." />
+<meta property="og:image" content="/icon-512.png" />
+<style>
+  :root {
+    --bg: #111111;
+    --panel: #161616;
+    --panel-2: #1a1a1a;
+    --border: #2a2a2a;
+    --text: #e8e8e8;
+    --text-dim: #999999;
+    --text-faint: #666666;
+    --accent: #6060cc;
+    --accent-bright: #8080ee;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  [data-lang="zh"] [data-en], [data-lang="en"] [data-zh] { display: none; }
+
+  a { color: inherit; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* ── Nav ─────────────────────────────────────────── */
+  .nav {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 0;
+    background: rgba(17,17,17,0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav .wrap { display: flex; align-items: center; gap: 12px; width: 100%; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; text-decoration: none; }
+  .brand img { width: 26px; height: 26px; border-radius: 6px; display: block; }
+  .nav-spacer { flex: 1; }
+  .nav-link {
+    font-size: 13px; color: var(--text-dim); text-decoration: none;
+    padding: 6px 10px; border-radius: 6px; transition: color 0.12s, background 0.12s;
+  }
+  .nav-link:hover { color: var(--text); background: #1e1e1e; }
+  .lang-btn {
+    font-size: 12px; color: var(--text-dim); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
+    cursor: pointer; transition: all 0.12s;
+  }
+  .lang-btn:hover { color: var(--text); border-color: var(--accent); }
+  .nav-cta {
+    font-size: 13px; font-weight: 600; color: #ffffff; background: var(--accent);
+    border-radius: 7px; padding: 7px 16px; text-decoration: none;
+    transition: background 0.12s;
+  }
+  .nav-cta:hover { background: var(--accent-bright); }
+
+  /* ── Hero ────────────────────────────────────────── */
+  .hero { padding: 88px 0 72px; text-align: center; position: relative; overflow: hidden; }
+  .hero-glow {
+    position: absolute; top: -180px; left: 50%; transform: translateX(-50%);
+    width: 640px; height: 640px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(96,96,204,0.35) 0%, rgba(96,96,204,0) 70%);
+    pointer-events: none;
+  }
+  .hero-inner { position: relative; }
+  .hero h1 {
+    font-size: 48px; font-weight: 800; margin: 0 0 18px;
+    letter-spacing: -0.02em;
+  }
+  .hero p.sub {
+    font-size: 18px; color: var(--text-dim); max-width: 560px; margin: 0 auto 36px;
+  }
+  .hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn-primary {
+    font-size: 15px; font-weight: 700; color: #ffffff; background: var(--accent);
+    border-radius: 10px; padding: 13px 28px; text-decoration: none;
+    box-shadow: 0 8px 24px rgba(96,96,204,0.35);
+    transition: background 0.12s, transform 0.12s;
+  }
+  .btn-primary:hover { background: var(--accent-bright); transform: translateY(-1px); }
+  .btn-secondary {
+    font-size: 15px; font-weight: 600; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 10px; padding: 13px 28px; text-decoration: none;
+    transition: border-color 0.12s;
+  }
+  .btn-secondary:hover { border-color: var(--accent); }
+  .hero-note { margin-top: 18px; font-size: 12px; color: var(--text-faint); }
+
+  /* ── Brush mark decoration ──────────────────────── */
+  .brush-mark { display: block; margin: 0 auto 28px; }
+
+  /* ── Features ────────────────────────────────────── */
+  .section { padding: 64px 0; }
+  .section-title { font-size: 26px; font-weight: 800; text-align: center; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .section-sub { font-size: 15px; color: var(--text-dim); text-align: center; max-width: 500px; margin: 0 auto 48px; }
+  .grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  }
+  @media (max-width: 800px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    overflow: hidden; cursor: pointer;
+    transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+  }
+  .card:hover {
+    transform: translateY(-4px);
+    border-color: var(--accent);
+    background: #1c1c2a;
+    box-shadow: 0 14px 32px rgba(0,0,0,0.35);
+  }
+  .card:active { transform: translateY(-1px); transition-duration: 0.05s; }
+  .card-media {
+    aspect-ratio: 16 / 9; background: #0d0d0d; position: relative;
+    border-bottom: 1px solid var(--border);
+  }
+  .card-media video { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .card-expand {
+    position: absolute; top: 8px; right: 8px; z-index: 1;
+    width: 26px; height: 26px; border-radius: 7px;
+    background: rgba(0,0,0,0.55); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.16s ease;
+  }
+  .card-expand svg { width: 13px; height: 13px; stroke: #ffffff; }
+  .card:hover .card-expand { opacity: 1; }
+  .card-body { padding: 18px 22px 22px; }
+  .card h3 { font-size: 15px; margin: 0 0 6px; font-weight: 700; }
+  .card p { font-size: 13px; color: var(--text-dim); margin: 0; }
+
+  /* ── Lightbox ────────────────────────────────────── */
+  .lightbox {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px; opacity: 0; pointer-events: none;
+    transition: opacity 0.18s ease;
+  }
+  .lightbox.open { opacity: 1; pointer-events: auto; }
+  .lightbox-card {
+    position: relative; width: 100%; max-width: 760px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
+    overflow: hidden; box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+    transform: scale(0.96); transition: transform 0.18s ease;
+  }
+  .lightbox.open .lightbox-card { transform: scale(1); }
+  .lightbox-media { aspect-ratio: 16 / 9; background: #0d0d0d; }
+  .lightbox-media video { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .lightbox-info { padding: 18px 24px 24px; }
+  .lightbox-info h3 { font-size: 17px; margin: 0 0 6px; }
+  .lightbox-info p { font-size: 13px; color: var(--text-dim); margin: 0; }
+  .lightbox-close {
+    position: absolute; top: 12px; right: 12px; z-index: 1;
+    width: 32px; height: 32px; border-radius: 8px; border: none;
+    background: rgba(0,0,0,0.55); color: #ffffff; font-size: 15px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background 0.12s;
+  }
+  .lightbox-close:hover { background: rgba(0,0,0,0.8); }
+
+  /* ── CTA band ────────────────────────────────────── */
+  .cta-band {
+    position: relative; overflow: hidden;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 20px;
+    padding: 48px 32px; text-align: center; margin: 0 auto;
+  }
+  .cta-band-bg {
+    position: absolute; inset: 0; z-index: 0;
+  }
+  .cta-band-bg video {
+    width: 100%; height: 100%; object-fit: cover;
+    transform: scale(1.1); /* headroom so blur doesn't reveal edges */
+    filter: blur(20px) brightness(0.45) saturate(1.15);
+    opacity: 0.55;
+    transition: filter 0.6s ease, opacity 0.6s ease;
+  }
+  .cta-band-bg::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(22,22,22,0.75) 0%, rgba(22,22,22,0.9) 100%);
+  }
+  .cta-band:hover .cta-band-bg video {
+    filter: blur(0px) brightness(0.55) saturate(1.15);
+    opacity: 0.9;
+  }
+  .cta-band-content { position: relative; z-index: 1; }
+  .cta-band h2 { font-size: 24px; margin: 0 0 10px; font-weight: 800; }
+  .cta-band p { color: var(--text-dim); margin: 0 0 26px; font-size: 14px; }
+
+  /* ── Footer ──────────────────────────────────────── */
+  footer { border-top: 1px solid var(--border); padding: 28px 0; }
+  .foot-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    font-size: 12px; color: var(--text-faint);
+  }
+  .foot-links { display: flex; gap: 16px; }
+  .foot-links a { color: var(--text-faint); text-decoration: none; }
+  .foot-links a:hover { color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="wrap">
+      <a class="brand" href="/">
+        <img src="/icon.svg" alt="" />
+        <span>Atelier</span>
+      </a>
+      <div class="nav-spacer"></div>
+      <a class="nav-link" href="https://github.com/Restatw/Atelier" target="_blank" rel="noopener">GitHub</a>
+      <button class="lang-btn" id="langToggle" type="button">中文</button>
+      <a class="nav-cta" href="https://atelier.re95.org/">
+        <span data-en>Launch</span><span data-zh>啟動</span>
+      </a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="hero-glow"></div>
+    <div class="wrap hero-inner">
+      <svg class="brush-mark" width="72" height="72" viewBox="0 0 192 192">
+        <rect width="192" height="192" rx="40" fill="#161616" stroke="#2a2a2a"/>
+        <path d="M48 144 C80 80 120 60 148 44" stroke="#6060cc" stroke-width="14" stroke-linecap="round" fill="none"/>
+        <circle cx="148" cy="44" r="8" fill="white"/>
+      </svg>
+      <h1>
+        <span data-en>Draw together, anywhere.</span>
+        <span data-zh>一起畫畫，隨處都能開始。</span>
+      </h1>
+      <p class="sub">
+        <span data-en>A free, open-source painting app that runs in your browser — layers, live collaboration, and cloud backup, with nothing to install.</span>
+        <span data-zh>免費、開源的瀏覽器繪圖工具——多圖層、即時協作、雲端備份，不用安裝任何東西。</span>
+      </p>
+      <div class="hero-actions">
+        <a class="btn-primary" href="https://atelier.re95.org/">
+          <span data-en>Launch Atelier →</span>
+          <span data-zh>啟動 Atelier →</span>
+        </a>
+        <a class="btn-secondary" href="https://github.com/Restatw/Atelier" target="_blank" rel="noopener">
+          <span data-en>View on GitHub</span>
+          <span data-zh>查看原始碼</span>
+        </a>
+      </div>
+      <div class="hero-note">
+        <span data-en>No account needed — opens straight into the canvas.</span>
+        <span data-zh>不需要註冊帳號——打開就能直接畫。</span>
+      </div>
+    </div>
+  </header>
+
+  <section class="section">
+    <div class="wrap">
+      <h2 class="section-title">
+        <span data-en>Everything you'd expect from a real painting tool</span>
+        <span data-zh>一套真正夠用的繪圖工具</span>
+      </h2>
+      <p class="section-sub">
+        <span data-en>Hover a card for a quick look — each one is Atelier actually doing it.</span>
+        <span data-zh>把滑鼠移到卡片上看看——每一張都是 Atelier 實際操作的畫面。</span>
+      </p>
+      <div class="grid">
+
+        <div class="card">
+          <div class="card-media">
+            <span class="card-expand"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></span>
+            <video muted loop playsinline preload="auto" poster="/demo-drawing.jpg">
+              <source src="/demo-drawing.webm" type="video/webm">
+              <source src="/demo-drawing.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="card-body">
+            <h3><span data-en>Full drawing toolkit</span><span data-zh>完整的繪圖工具</span></h3>
+            <p><span data-en>Pencil, brush, eraser, shapes, fill, eyedropper, text — plus a customizable brush plugin system to add more.</span><span data-zh>鉛筆、毛筆、橡皮擦、圖形、填色、取色器、文字——還有可擴充的筆刷 plugin 系統。</span></p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-media">
+            <span class="card-expand"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></span>
+            <video muted loop playsinline preload="auto" poster="/demo-layers.jpg">
+              <source src="/demo-layers.webm" type="video/webm">
+              <source src="/demo-layers.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="card-body">
+            <h3><span data-en>Unlimited layers</span><span data-zh>圖層系統</span></h3>
+            <p><span data-en>Add, duplicate, merge, reorder, and control opacity per layer — up to 50 per canvas.</span><span data-zh>新增、複製、合併、排序、個別控制透明度——每個畫布最多 50 層。</span></p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-media">
+            <span class="card-expand"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></span>
+            <video muted loop playsinline preload="auto" poster="/demo-collab.jpg">
+              <source src="/demo-collab.webm" type="video/webm">
+              <source src="/demo-collab.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="card-body">
+            <h3><span data-en>Live collaboration</span><span data-zh>即時協作</span></h3>
+            <p><span data-en>Draw together in real time. Every participant gets their own layer, lockable to prevent accidental edits.</span><span data-zh>多人即時共畫，每個人有自己的圖層，可以鎖定避免被誤改。</span></p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-media">
+            <span class="card-expand"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></span>
+            <video muted loop playsinline preload="auto" poster="/demo-ipfs.jpg">
+              <source src="/demo-ipfs.webm" type="video/webm">
+              <source src="/demo-ipfs.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="card-body">
+            <h3><span data-en>IPFS backup</span><span data-zh>IPFS 備份</span></h3>
+            <p><span data-en>Back up and restore your canvas to IPFS via Pinata or your own node — content-addressed, no vendor lock-in.</span><span data-zh>透過 Pinata 或自架節點備份、還原到 IPFS，內容定址、不綁定單一服務商。</span></p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-media">
+            <span class="card-expand"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></span>
+            <video muted loop playsinline preload="auto" poster="/demo-offline.jpg">
+              <source src="/demo-offline.webm" type="video/webm">
+              <source src="/demo-offline.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="card-body">
+            <h3><span data-en>Installable & offline</span><span data-zh>可安裝、離線使用</span></h3>
+            <p><span data-en>A real PWA — install it like a native app and keep drawing with no connection.</span><span data-zh>真正的 PWA，可以像原生 App 一樣安裝，沒網路也能繼續畫。</span></p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-media">
+            <span class="card-expand"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></span>
+            <video muted loop playsinline preload="auto" poster="/demo-everywhere.jpg">
+              <source src="/demo-everywhere.webm" type="video/webm">
+              <source src="/demo-everywhere.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="card-body">
+            <h3><span data-en>Works everywhere</span><span data-zh>跨裝置支援</span></h3>
+            <p><span data-en>Full touch support on mobile and tablets, auto-saves to your device, and picks a portrait or landscape canvas to match your screen.</span><span data-zh>手機、平板完整支援觸控，自動存到裝置本機，並依螢幕自動選擇直式或橫式畫布。</span></p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="cta-band">
+        <div class="cta-band-bg">
+          <video muted loop playsinline autoplay preload="auto">
+            <source src="/demo-drawing.webm" type="video/webm">
+            <source src="/demo-drawing.mp4" type="video/mp4">
+          </video>
+        </div>
+        <div class="cta-band-content">
+          <h2><span data-en>Open a canvas and start drawing</span><span data-zh>打開畫布，開始畫吧</span></h2>
+          <p><span data-en>Free, open-source, and running in your browser in a couple seconds.</span><span data-zh>免費、開源，幾秒鐘就能在瀏覽器裡打開。</span></p>
+          <a class="btn-primary" href="https://atelier.re95.org/">
+            <span data-en>Launch Atelier →</span>
+            <span data-zh>啟動 Atelier →</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap foot-row">
+      <span>© 2026 Atelier — MIT License</span>
+      <div class="foot-links">
+        <a href="https://github.com/Restatw/Atelier" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://atelier.re95.org/">
+          <span data-en>Launch app</span><span data-zh>啟動工具</span>
+        </a>
+      </div>
+    </div>
+  </footer>
+
+  <div class="lightbox" id="lightbox">
+    <div class="lightbox-card" id="lightboxCard">
+      <button class="lightbox-close" id="lightboxClose" type="button">✕</button>
+      <div class="lightbox-media">
+        <video id="lightboxVideo" muted loop playsinline></video>
+      </div>
+      <div class="lightbox-info">
+        <h3 id="lightboxTitle"></h3>
+        <p id="lightboxDesc"></p>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var btn = document.getElementById('langToggle');
+  var stored = null;
+  try { stored = localStorage.getItem('atelier-landing-lang'); } catch (e) {}
+  var lang = stored || (navigator.language && navigator.language.toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en');
+
+  function apply(l) {
+    lang = l;
+    root.setAttribute('data-lang', l);
+    root.setAttribute('lang', l === 'zh' ? 'zh-Hant' : 'en');
+    btn.textContent = l === 'zh' ? 'EN' : '中文';
+    try { localStorage.setItem('atelier-landing-lang', l); } catch (e) {}
+  }
+
+  btn.addEventListener('click', function () {
+    apply(lang === 'zh' ? 'en' : 'zh');
+  });
+
+  apply(lang);
+})();
+
+(function () {
+  // Feature-card preview clips: play on hover/focus (desktop) — paused
+  // otherwise so six videos aren't all decoding at once for no reason.
+  // Click/tap opens the same clip larger in the lightbox below instead of
+  // toggling the small inline preview, since touch devices can't hover.
+  document.querySelectorAll('.card').forEach(function (card) {
+    var video = card.querySelector('video');
+    if (!video) return;
+    var playing = false;
+    function play() {
+      if (playing) return;
+      playing = true;
+      try { video.currentTime = 0; } catch (e) {}
+      video.play().catch(function () {});
+    }
+    function stop() {
+      playing = false;
+      video.pause();
+    }
+    card.addEventListener('mouseenter', play);
+    card.addEventListener('mouseleave', stop);
+    card.addEventListener('focus', play);
+    card.addEventListener('blur', stop);
+  });
+})();
+
+(function () {
+  // Lightbox: click a card to see its clip larger, centered, over a
+  // blurred backdrop. Reuses one <video> element, fed from whichever
+  // card was clicked, rather than keeping 6 large videos in the DOM.
+  var lightbox      = document.getElementById('lightbox');
+  var lightboxVideo = document.getElementById('lightboxVideo');
+  var lightboxTitle = document.getElementById('lightboxTitle');
+  var lightboxDesc  = document.getElementById('lightboxDesc');
+  var closeBtn      = document.getElementById('lightboxClose');
+
+  function openFromCard(card) {
+    var srcVideo = card.querySelector('.card-media video');
+    if (!srcVideo) return;
+    lightboxVideo.innerHTML = srcVideo.innerHTML; // clone <source> tags
+    lightboxVideo.load();
+    lightboxVideo.play().catch(function () {});
+    lightboxTitle.innerHTML = card.querySelector('h3').innerHTML;
+    lightboxDesc.innerHTML  = card.querySelector('p').innerHTML;
+    lightbox.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function close() {
+    lightbox.classList.remove('open');
+    document.body.style.overflow = '';
+    lightboxVideo.pause();
+    lightboxVideo.removeAttribute('src');
+    lightboxVideo.innerHTML = '';
+  }
+
+  document.querySelectorAll('.card').forEach(function (card) {
+    card.addEventListener('click', function () { openFromCard(card); });
+  });
+  closeBtn.addEventListener('click', close);
+  lightbox.addEventListener('click', function (e) {
+    if (e.target === lightbox) close();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') close();
+  });
+})();
+</script>
+
+</body>
+</html>
