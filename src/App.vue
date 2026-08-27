@@ -11,7 +11,7 @@
     <div class="main">
       <div class="canvas-area" ref="wrapperRef"
         :style="{ background: canvasBg }"
-        :class="canvasCursorClass"
+        :class="[canvasCursorClass, { 'has-brush-cursor': brushCursorStyle }]"
         @mousemove="onPointerMove" @mouseup="onPointerUp" @mouseleave="onPointerLeave">
         <div class="canvas-vp" :style="vpStyle">
           <canvas
@@ -40,6 +40,10 @@
           <span class="crh-label">{{ canvasDragW }} × {{ canvasDragH }}</span>
         </div>
         </div><!-- /.canvas-vp -->
+
+        <!-- Brush-size hover cursor: screen-space (not canvas-vp), so it stays
+             a plain circle regardless of canvas rotation/zoom. -->
+        <div v-if="brushCursorStyle" class="brush-cursor" :style="brushCursorStyle" />
 
         <!-- Text input overlay: outside canvas-vp, positioned in screen coords.
              Placement div top = textScreenPos.y - TEXT_HEADER_H so textarea top == textScreenPos.y -->
@@ -336,6 +340,21 @@
                 @mousedown.stop @touchstart.stop />
             </div>
           </div>
+          <!-- Hardness/Flow only mean something for an actual brush plugin
+               (pen/brush/eraser/airbrush) — line/rect/circle/mix/etc. share
+               Size+Opacity above but have no dab tip or per-pass build-up. -->
+          <div v-if="isBrushPluginTool(currentTool)" class="bp-row">
+            <span class="bp-label">{{ t('hardness') }}</span>
+            <input type="range" min="0" max="100" v-model.number="brushHardness" class="bp-slider" @mousedown.stop @touchstart.stop />
+            <div class="bp-val-wrap">
+              <input type="number" class="bp-val-input" min="0" max="100"
+                :value="brushHardness"
+                @change="brushHardness = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = brushHardness"
+                @keydown.enter.stop="$event.target.blur()"
+                @focus.stop="$event.target.select()"
+                @mousedown.stop @touchstart.stop /><span class="bp-unit">%</span>
+            </div>
+          </div>
           <div class="bp-row">
             <span class="bp-label">{{ t('opacity') }}</span>
             <input type="range" min="0" max="100" v-model.number="strokeOpacity" class="bp-slider" @mousedown.stop @touchstart.stop />
@@ -343,6 +362,18 @@
               <input type="number" class="bp-val-input" min="0" max="100"
                 :value="strokeOpacity"
                 @change="strokeOpacity = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = strokeOpacity"
+                @keydown.enter.stop="$event.target.blur()"
+                @focus.stop="$event.target.select()"
+                @mousedown.stop @touchstart.stop /><span class="bp-unit">%</span>
+            </div>
+          </div>
+          <div v-if="isBrushPluginTool(currentTool)" class="bp-row">
+            <span class="bp-label">{{ t('flow') }}</span>
+            <input type="range" min="0" max="100" v-model.number="brushFlow" class="bp-slider" @mousedown.stop @touchstart.stop />
+            <div class="bp-val-wrap">
+              <input type="number" class="bp-val-input" min="0" max="100"
+                :value="brushFlow"
+                @change="brushFlow = Math.max(0, Math.min(100, parseInt($event.target.value) || 0)); $event.target.value = brushFlow"
                 @keydown.enter.stop="$event.target.blur()"
                 @focus.stop="$event.target.select()"
                 @mousedown.stop @touchstart.stop /><span class="bp-unit">%</span>
@@ -1045,9 +1076,57 @@ const tools = computed(() => [
 const currentTool   = ref('pen')
 const currentColor  = ref('#000000')
 const fillColor     = ref('#ffffff')
-const lineWidth     = ref(4)
-const strokeOpacity = ref(100)
 const wandTolerance = ref(32)
+
+// Per-brush-plugin settings (Size/Hardness/Opacity/Flow) — each brush
+// plugin (pen/brush/eraser/airbrush/...) remembers its OWN values
+// independently, seeded from that plugin's own `defaults`, so switching
+// tools shows each brush's own last-used settings rather than one value
+// shared across every tool. Non-brush tools (line/rect/circle/mix/
+// sel_pen/sel_eras/text) don't participate in this — they keep sharing
+// the plain _sharedLineWidth/_sharedOpacity refs below via lineWidth/
+// strokeOpacity's fallback branch.
+const brushToolSettings = reactive({}) // { [pluginId]: { size, hardness, opacity, flow } }
+const DEFAULT_BRUSH_SETTINGS = { size: 4, hardness: 100, opacity: 100, flow: 100 }
+function ensureBrushToolSettings(toolId) {
+  if (!brushToolSettings[toolId]) {
+    const plugin = getPlugin(toolId)
+    brushToolSettings[toolId] = { ...DEFAULT_BRUSH_SETTINGS, ...(plugin?.defaults || {}) }
+  }
+  return brushToolSettings[toolId]
+}
+function isBrushPluginTool(toolId) {
+  return getPlugin(toolId)?.type === 'brush'
+}
+
+const _sharedLineWidth = ref(4)    // Size fallback for non-brush-plugin tools
+const _sharedOpacity   = ref(100)  // Opacity fallback for non-brush-plugin tools
+
+// lineWidth/strokeOpacity stay drop-in compatible with every existing
+// v-model/.value use elsewhere in this file (writable computeds behave
+// like refs for both) — they just now resolve to the current tool's own
+// brush settings when it's a brush plugin, and to the shared fallback
+// otherwise.
+const lineWidth = computed({
+  get()  { return isBrushPluginTool(currentTool.value) ? ensureBrushToolSettings(currentTool.value).size : _sharedLineWidth.value },
+  set(v) { if (isBrushPluginTool(currentTool.value)) ensureBrushToolSettings(currentTool.value).size = v; else _sharedLineWidth.value = v },
+})
+const strokeOpacity = computed({
+  get()  { return isBrushPluginTool(currentTool.value) ? ensureBrushToolSettings(currentTool.value).opacity : _sharedOpacity.value },
+  set(v) { if (isBrushPluginTool(currentTool.value)) ensureBrushToolSettings(currentTool.value).opacity = v; else _sharedOpacity.value = v },
+})
+// Hardness/Flow only exist for brush-plugin tools — no legacy shared
+// fallback needed since these are new (the popup only shows them when
+// isBrushPluginTool(currentTool) is true; see brushHardness/brushFlow's
+// use in the template).
+const brushHardness = computed({
+  get()  { return ensureBrushToolSettings(currentTool.value).hardness },
+  set(v) { ensureBrushToolSettings(currentTool.value).hardness = v },
+})
+const brushFlow = computed({
+  get()  { return ensureBrushToolSettings(currentTool.value).flow },
+  set(v) { ensureBrushToolSettings(currentTool.value).flow = v },
+})
 
 // ── Text tool state ───────────────────────────────────────
 const textActive   = ref(false)
@@ -1064,6 +1143,12 @@ const FONT_FAMILIES = [
   { label: 'Mono', value: 'monospace' },
 ]
 const cursorPos     = ref(null)
+// Raw screen-space position of the pointer within .canvas-area (unlike
+// cursorPos, which is in rotated/zoomed canvas-logical coordinates) — used
+// only to place the brush-size hover cursor, which should stay a plain
+// screen-aligned circle regardless of canvas rotation. Shares cursorPos's
+// null-on-leave lifecycle; see onPointerLeave.
+const brushCursorScreen = ref(null)
 
 const _extraTools = {
   magic_wand: { labelKey: 'tool_magic_wand', comp: Wand2 },
@@ -1812,6 +1897,40 @@ const canvasCursorClass = computed(() => {
   if (['select_rect', 'lasso', 'sel_pen', 'sel_eras', 'magic_wand'].includes(currentTool.value)) return 'cur-crosshair'
   if (currentTool.value === 'text') return 'cur-text'
   return ''
+})
+
+// On-canvas diameter (logical px, before fitScale) of the current tool's
+// brush footprint at the current lineWidth — null for tools with no size
+// concept (fill, eyedropper, move, select/lasso, text, ...). Brush-plugin
+// tools (pen/brush/eraser/airbrush/any future plugin) report their own via
+// cursorDiameter() so this stays correct even as multipliers change; the
+// three built-ins below aren't plugins and so declare their own multiplier
+// inline (see applyStyle()/mixRadius() for the matching draw-time formula).
+function toolCursorDiameter(toolId) {
+  const plugin = getPlugin(toolId)
+  if (plugin?.type === 'brush') {
+    return typeof plugin.cursorDiameter === 'function' ? plugin.cursorDiameter(lineWidth.value) : lineWidth.value
+  }
+  if (toolId === 'line' || toolId === 'rect' || toolId === 'circle') return lineWidth.value
+  if (toolId === 'mix') return mixRadius() * 2
+  if (toolId === 'sel_pen' || toolId === 'sel_eras') return lineWidth.value * 2
+  return null
+}
+const brushCursorDiameter = computed(() => toolCursorDiameter(currentTool.value))
+
+// Screen-space style for the hover cursor circle — null (and so hidden via
+// v-if) whenever the pointer's off-canvas or the current tool has no size
+// concept. Diameter converts logical px to screen px via fitScale so it
+// tracks canvas zoom.
+const brushCursorStyle = computed(() => {
+  if (!brushCursorScreen.value || !brushCursorDiameter.value) return null
+  const d = Math.max(2, brushCursorDiameter.value * fitScale.value)
+  return {
+    left:   brushCursorScreen.value.x + 'px',
+    top:    brushCursorScreen.value.y + 'px',
+    width:  d + 'px',
+    height: d + 'px',
+  }
 })
 
 watch(canvasSize, () => { cancelSelection() })
@@ -2675,16 +2794,50 @@ let startY        = 0
 let strokePoints  = []  // accumulated points of an in-progress freehand stroke
 let layerSnapshot = null
 let drawingButton = 0
-let strokeCanvas  = null  // temp canvas for masked brush-plugin strokes
+// Accumulates this stroke's Flow-alpha dabs for its whole duration (see
+// compositeStroke()) — allocated in onPointerDown for any brush-plugin
+// stroke, masked or not.
+let strokeCanvas  = null
 let maskCache     = null  // effective mask canvas cached per stroke
-let brushStampLast = null // last stamp position, for 'stamp'-mode brush plugins
+let brushStampLast = null // last mousemove position, for 'stamp'-mode brush plugins
+// Cumulative path length since mousedown, and the length at which the next
+// dab is due — mirrors mixCumDist/mixNextStampAt below and exists for the
+// exact same reason: stamping unconditionally once per mousemove event
+// (rather than at fixed distance intervals) makes a slow/jittery drag
+// deposit far more paint than a fast one covering the same path, since a
+// real pointer fires many more events per px when moving slowly.
+let brushCumDist     = 0
+let brushNextStampAt = 0
+// Keeps depositing dabs at the held pointer position while the mouse stays
+// down but doesn't move — distance-based stamping alone (above) only fires
+// when the pointer actually travels, so a real pen just resting in one spot
+// would otherwise never build up further, unlike a real brush loaded with
+// ink. Ticks independently of movement; see startBrushHoldTimer.
+let brushHoldTimer = null
+const BRUSH_HOLD_INTERVAL_MS = 40
 
 // ── Mix (smudge) tool state ────────────────────────────────
 let mixBuf      = null  // "carried" paint sampled under the brush, updated as the stroke moves
 let mixR        = 0     // sample radius (px) for the current stroke
-let mixLast     = null  // last stamped point, for interpolating spacing along the path
+let mixLast     = null  // last mousemove position (NOT last stamp — see mixNextStampAt)
 let mixMaskCache = null // effective selection mask, cached per stroke
 let _mixMaskCanvas = null, _mixMaskRadius = -1  // cached soft circular falloff mask, keyed by radius
+// Cumulative path length travelled since mousedown, and the cumulative
+// length at which the next dab is due — NOT reset per mousemove event. A
+// real pointer fires mousemove far more often when moving slowly (a slow
+// drag or hand jitter can produce many events for a couple of px each) than
+// when moving fast; stamping unconditionally once per event — as this used
+// to — stamped the same near-stationary spot dozens of times over for a
+// slow drag, wildly overshooting the ~8-overlapping-dabs assumption
+// stampMixAt's alpha math is solved for (see MIX_DAB_OVERLAP) and depositing
+// far more/darker pigment, over a much wider area, than an equivalent fast
+// drag over the same path — this is what made mixing feel like it painted
+// solid colour into "empty" space and made strength feel inconsistent.
+// Tracking distance-since-last-dab across events (instead of per-event)
+// guarantees dabs land every `spacing` px along the actual path regardless
+// of how many (or how few) mousemove events that path was split across.
+let mixCumDist     = 0
+let mixNextStampAt = 0
 
 function mixRadius() {
   return Math.max(3, Math.round(lineWidth.value * 1.5))
@@ -2707,7 +2860,17 @@ function getMixFalloffMask(r) {
 
 function sampleCanvasRegion(srcCanvas, cx, cy, r) {
   const buf = mkCanvas(r * 2, r * 2)
-  buf.getContext('2d').drawImage(srcCanvas, cx - r, cy - r, r * 2, r * 2, 0, 0, r * 2, r * 2)
+  const bctx = buf.getContext('2d')
+  // cx/cy are fractional (interpolated dab positions), so this crop lands
+  // at a sub-pixel offset — with smoothing on, that bilinear-resamples the
+  // source, which for repeated round-trip sample→blend→re-sample cycles
+  // (Mix's whole pickup/drift loop) introduces a tiny but real per-dab
+  // colour bias even on a perfectly uniform source, compounding over many
+  // dabs into a visible darken/lighten drift on prolonged scrubbing over
+  // the same area. Sampling for Mix should be an exact copy, not a smooth
+  // resample, so disable it here.
+  bctx.imageSmoothingEnabled = false
+  bctx.drawImage(srcCanvas, cx - r, cy - r, r * 2, r * 2, 0, 0, r * 2, r * 2)
   return buf
 }
 
@@ -2718,6 +2881,8 @@ function handleMixDown(p) {
   mixBuf  = sampleCanvasRegion(ctx.canvas, p.x, p.y, mixR)
   mixLast = { x: p.x, y: p.y }
   mixMaskCache = (selActive.value && (selRect.value || selMaskCanvas)) ? getEffectiveMask() : null
+  mixCumDist     = 0
+  mixNextStampAt = 0
 }
 
 const MIX_PICKUP_RATE = 0.35  // how fast the carried paint drifts toward newly-touched pixels, independent of opacity
@@ -2769,6 +2934,9 @@ function stampMixAt(ctx, q) {
 
   ctx.save()
   ctx.globalAlpha = strength
+  // q.x/q.y are fractional — see sampleCanvasRegion's comment on why
+  // smoothing needs to be off for Mix specifically.
+  ctx.imageSmoothingEnabled = false
   ctx.drawImage(stamp, q.x - r, q.y - r)
   ctx.restore()
 
@@ -2786,9 +2954,22 @@ function handleMixMove(p) {
   const spacing = Math.max(2, mixR / 4)
   const dx = p.x - mixLast.x, dy = p.y - mixLast.y
   const dist = Math.hypot(dx, dy)
-  const steps = Math.max(1, Math.round(dist / spacing))
-  for (let i = 1; i <= steps; i++) {
-    stampMixAt(ctx, { x: mixLast.x + dx * i / steps, y: mixLast.y + dy * i / steps })
+  // Stamp at fixed distance intervals along the actual travelled path,
+  // tracked cumulatively across events — NOT once per event. A slow drag
+  // (or hand jitter) fires far more mousemove events per px than a fast
+  // one; stamping unconditionally per event used to re-stamp a near-
+  // stationary spot dozens of times for a slow drag, blowing way past the
+  // ~8-overlap the alpha math in stampMixAt is solved for and depositing
+  // far more pigment, over a much wider area, than the same drag done
+  // quickly — see mixCumDist's declaration.
+  if (dist > 0) {
+    const segStart = mixCumDist
+    mixCumDist += dist
+    while (mixNextStampAt <= mixCumDist) {
+      const t = (mixNextStampAt - segStart) / dist
+      stampMixAt(ctx, { x: mixLast.x + dx * t, y: mixLast.y + dy * t })
+      mixNextStampAt += spacing
+    }
   }
   mixLast = { x: p.x, y: p.y }
   // Usually paints onto the active layer directly; in selDrawMode it's
@@ -2816,68 +2997,176 @@ function getActiveCtx() {
 // Generic driver for any registry plugin with type: 'brush' (see
 // plugins/builtin/brushes.js for the plugin contract). Owns everything a
 // brush plugin shouldn't have to reimplement itself: snapshot/restore,
-// selection-mask clipping, and compositeOperation (source-over vs
-// destination-out for erasers) — a plugin's paint()/stamp() only ever
-// draws in plain source-over onto whatever ctx it's handed.
+// selection-mask clipping, compositeOperation (source-over vs
+// destination-out for erasers), and — see compositeStroke() below — the
+// Size/Hardness/Opacity/Flow model: a plugin's paint()/stamp() only ever
+// draws in plain source-over onto whatever ctx it's handed, at whatever
+// alpha IT decides (normally settings.flow), and never needs to know
+// about the stroke-wide Opacity ceiling at all.
 function brushSettings() {
-  return { color: activeDrawColor(), lineWidth: lineWidth.value, opacity: strokeOpacity.value / 100 }
+  const t = ensureBrushToolSettings(currentTool.value)
+  return {
+    color:     activeDrawColor(),
+    lineWidth: t.size,
+    hardness:  t.hardness,
+    opacity:   t.opacity / 100,
+    flow:      t.flow / 100,
+  }
+}
+
+// Distance between dabs for a 'stamp'-mode plugin. A fixed plugin.stampSpacing
+// (e.g. airbrush's scatter cadence) wins if given; otherwise derived from the
+// plugin's own on-canvas footprint (cursorDiameter — the same figure the
+// hover cursor circle uses) so tiny and huge brushes both look like a smooth
+// continuous line rather than either dots-with-gaps or wastefully dense dabs.
+// Deliberately tight (≈1/8 diameter, floor 1px): at anything looser, a hard-
+// edged (high-Hardness) dab under 100% Flow shows visible discrete rings
+// along the stroke where consecutive dabs' edges overlap — this is affordable
+// now that accumulating a dab (accumulateDab) is decoupled from the
+// expensive full-layer composite step (compositeStroke), which only runs
+// once per pointermove event instead of once per dab — see onPointerMove.
+function brushDabSpacing(plugin) {
+  if (typeof plugin.stampSpacing === 'number') return plugin.stampSpacing
+  const diameter = plugin.cursorDiameter ? plugin.cursorDiameter(lineWidth.value) : lineWidth.value
+  return Math.max(1, diameter / 8)
 }
 
 function isMasked() {
   return selActive.value && (selRect.value || selMaskCanvas)
 }
 
-// 'path'-mode: replays the whole accumulated path from a clean snapshot.
-function renderBrushPath(plugin, points) {
-  const settings = brushSettings()
+// Composites the stroke-so-far (strokeCanvas, which paint()/stamp() have
+// been accumulating Flow-alpha dabs into — see its declaration) onto the
+// real layer, restoring the pre-stroke snapshot first so this can be called
+// repeatedly as the stroke progresses without double-applying anything.
+//
+// The key move: strokeCanvas's own per-pixel alpha can reach all the way to
+// ~1 wherever Flow-alpha dabs have overlapped enough times (that build-up
+// IS what Flow controls — low flow needs many overlapping passes to reach
+// full local coverage, high flow gets there in one) — but drawImage()-ing
+// strokeCanvas onto the layer through an outer ctx.globalAlpha = opacity
+// multiplies that per-pixel alpha down by `opacity`, so the stroke's
+// effective coverage can never exceed Opacity no matter how much Flow
+// build-up happened inside strokeCanvas. That's exactly Photoshop's
+// Opacity-caps-Flow-buildup relationship.
+function compositeStroke(plugin, settings) {
   const ctx = getActiveCtx()
+  const { width: lw, height: lh } = activeLayer.value.canvas
   ctx.putImageData(layerSnapshot, 0, 0)
 
-  if (isMasked() && strokeCanvas) {
-    const { width: lw, height: lh } = activeLayer.value.canvas
-    const sctx = strokeCanvas.getContext('2d')
-    sctx.clearRect(0, 0, lw, lh)
-    sctx.globalCompositeOperation = 'source-over'
-    plugin.paint(sctx, points, settings)
-    if (maskCache) {
-      sctx.globalCompositeOperation = 'destination-in'
-      sctx.drawImage(maskCache, 0, 0)
-    }
-    ctx.globalCompositeOperation = plugin.blend || 'source-over'
-    ctx.drawImage(strokeCanvas, 0, 0)
-  } else {
-    ctx.globalCompositeOperation = plugin.blend || 'source-over'
-    plugin.paint(ctx, points, settings)
-  }
-  ctx.globalCompositeOperation = 'source-over'
-}
-
-// 'stamp'-mode: one dab, accumulating directly rather than replaying.
-// Masked case accumulates dabs onto strokeCanvas (never cleared mid-stroke)
-// so every stamp still re-applies the whole stroke-so-far through the mask
-// — a lingering cursor keeps building density under the mask exactly like
-// it would unmasked.
-function stampBrush(plugin, point) {
-  const settings = brushSettings()
-  const ctx = getActiveCtx()
-
-  if (isMasked() && strokeCanvas) {
-    const { width: lw, height: lh } = activeLayer.value.canvas
-    const sctx = strokeCanvas.getContext('2d')
-    sctx.globalCompositeOperation = 'source-over'
-    plugin.stamp(sctx, point, settings)
+  let src = strokeCanvas
+  if (isMasked() && maskCache) {
+    // Clip a COPY, not strokeCanvas itself — future dabs this stroke still
+    // need to accumulate onto the raw (unmasked) buffer.
     const tmp = mkCanvas(lw, lh)
     const tc = tmp.getContext('2d')
     tc.drawImage(strokeCanvas, 0, 0)
-    if (maskCache) { tc.globalCompositeOperation = 'destination-in'; tc.drawImage(maskCache, 0, 0) }
-    ctx.putImageData(layerSnapshot, 0, 0)
-    ctx.globalCompositeOperation = plugin.blend || 'source-over'
-    ctx.drawImage(tmp, 0, 0)
-  } else {
-    ctx.globalCompositeOperation = plugin.blend || 'source-over'
-    plugin.stamp(ctx, point, settings)
+    tc.globalCompositeOperation = 'destination-in'
+    tc.drawImage(maskCache, 0, 0)
+    src = tmp
   }
+
+  ctx.globalCompositeOperation = plugin.blend || 'source-over'
+  ctx.globalAlpha = settings.opacity
+  ctx.drawImage(src, 0, 0)
+  ctx.globalAlpha = 1
   ctx.globalCompositeOperation = 'source-over'
+}
+
+// 'path'-mode: replays the whole accumulated path each call, at Flow alpha,
+// into a freshly-cleared strokeCanvas (path-mode plugins draw the path as
+// ONE shape via ctx.stroke(), which — unlike stamped dabs — doesn't
+// self-compound where it crosses itself within a single call, so there's no
+// true per-pass Flow build-up here the way stamp-mode dabs get; only
+// Opacity's ceiling behaviour applies). No built-in plugin uses this mode
+// any more (pen/brush/eraser are all 'stamp' now, for real Hardness/Flow
+// support) — kept for any third-party plugin that wants a smooth vector-
+// style stroke without dab texture.
+function renderBrushPath(plugin, points) {
+  const settings = brushSettings()
+  const { width: lw, height: lh } = activeLayer.value.canvas
+  const sctx = strokeCanvas.getContext('2d')
+  sctx.clearRect(0, 0, lw, lh)
+  sctx.globalCompositeOperation = 'source-over'
+  sctx.globalAlpha = settings.flow
+  plugin.paint(sctx, points, settings)
+  sctx.globalAlpha = 1
+  compositeStroke(plugin, settings)
+}
+
+// 'stamp'-mode dabs accumulate into strokeCanvas (never cleared mid-stroke)
+// at Flow alpha — overlapping dabs (a lingering cursor, a slow drag, or
+// deliberately scribbling back and forth) compound via normal source-over
+// blending, which is exactly Flow's "build up toward Opacity with repeated
+// passes" behaviour. See compositeStroke() for the Opacity ceiling this
+// gets composited through.
+//
+// Accumulates one dab into strokeCanvas ONLY — cheap (a small offscreen
+// draw), unlike compositeStroke (a full-layer-sized putImageData +
+// drawImage). Multiple dabs from one pointermove event should all call
+// this in a loop and let the caller composite ONCE afterward — see
+// onPointerMove's stamp-mode branch. Calling compositeStroke once per dab
+// (the original version of this split) made small brushes (which space
+// dabs much closer together in absolute px) visibly janky, since a single
+// fast mousemove could queue up dozens of full-layer composites.
+function accumulateDab(plugin, point, settings) {
+  const sctx = strokeCanvas.getContext('2d')
+  sctx.globalCompositeOperation = 'source-over'
+  sctx.globalAlpha = settings.flow
+  plugin.stamp(sctx, point, settings)
+  sctx.globalAlpha = 1
+}
+
+// Single-dab convenience wrapper (accumulate + composite together) for
+// call sites that only ever place exactly one dab, e.g. onPointerDown's
+// click-with-no-drag mark.
+function stampBrush(plugin, point) {
+  const settings = brushSettings()
+  accumulateDab(plugin, point, settings)
+  compositeStroke(plugin, settings)
+}
+
+// rAF-throttled compositeStroke — same pattern as requestComposite (the
+// multi-layer display merge) below, applied to the single-layer stroke
+// composite. A fast drag with a small brush can accumulate many dabs
+// across many pointermove events within one animation frame (spacing is
+// tight — see brushDabSpacing — specifically so small brushes don't show
+// banding), and compositeStroke's putImageData+drawImage cost is O(layer
+// area) regardless of how many dabs it's asked to show — coalescing every
+// event within a frame into one compositeStroke call, instead of one per
+// event, is what actually fixes small-brush jank rather than just moving
+// it from "per dab" (the earlier, worse version) to "per event".
+let _strokeCompositeRAF = null
+function requestStrokeComposite() {
+  if (_strokeCompositeRAF) return
+  _strokeCompositeRAF = requestAnimationFrame(() => {
+    _strokeCompositeRAF = null
+    if (!drawing || !strokeCanvas) return
+    const plugin = getPlugin(currentTool.value)
+    if (plugin?.type !== 'brush') return
+    compositeStroke(plugin, brushSettings())
+  })
+}
+
+// Keeps depositing dabs at brushStampLast (the current held position, kept
+// up to date by onPointerMove even when the pointer isn't travelling far
+// enough to trigger a distance-based dab) for as long as the stroke stays
+// active — see brushHoldTimer's declaration for why. Self-guards against
+// `drawing` having gone false through some path that didn't explicitly
+// call stopBrushHoldTimer, so an exhaustive audit of every draw-cancelling
+// code path isn't required for correctness.
+function startBrushHoldTimer(plugin) {
+  stopBrushHoldTimer()
+  brushHoldTimer = setInterval(() => {
+    if (!drawing || !strokeCanvas || getPlugin(currentTool.value) !== plugin) { stopBrushHoldTimer(); return }
+    const settings = brushSettings()
+    accumulateDab(plugin, brushStampLast, settings)
+    compositeStroke(plugin, settings)
+    requestComposite(activeLayerId.value)
+  }, BRUSH_HOLD_INTERVAL_MS)
+}
+function stopBrushHoldTimer() {
+  if (brushHoldTimer) { clearInterval(brushHoldTimer); brushHoldTimer = null }
 }
 
 function applyStyle(ctx) {
@@ -3063,18 +3352,20 @@ function onPointerDown(e) {
   if (isBrush) {
     strokePoints = [{ x: p.x, y: p.y }]
     brushStampLast = { x: p.x, y: p.y }
-  }
-
-  if (masked && isBrush) {
-    // 遮罩模式：在 strokeCanvas 上累積筆跡，避免 clip() 破壞路徑
-    maskCache    = getEffectiveMask()
+    brushCumDist = 0
+    brushNextStampAt = 0
+    // strokeCanvas accumulates this stroke's Flow-alpha dabs for its whole
+    // duration (masked or not) — see compositeStroke()'s comment for why
+    // this always exists now, not just under a selection mask.
     strokeCanvas = mkCanvas(lw, lh)
+    if (masked) maskCache = getEffectiveMask()
   }
 
   if (isBrush && brushPlugin.mode === 'stamp') {
     // A single click with no move should still leave a mark.
     stampBrush(brushPlugin, p)
     requestComposite(activeLayerId.value)
+    startBrushHoldTimer(brushPlugin)
   }
 }
 
@@ -3107,6 +3398,8 @@ function _onPointerMoveInner(e) {
   }
   const p = canvasPoint(e)
   cursorPos.value = p
+  const _ar = wrapperRef.value.getBoundingClientRect()
+  brushCursorScreen.value = { x: e.clientX - _ar.left, y: e.clientY - _ar.top }
 
   // Update hover handle (runs every frame so cursor stays correct)
   selHoverHandle.value = (selFloat && !selFloat.drawMode && !selTransformDrag) ? hitTestSelHandle(p) : null
@@ -3131,12 +3424,30 @@ function _onPointerMoveInner(e) {
 
   if (brushPlugin?.type === 'brush') {
     if (brushPlugin.mode === 'stamp') {
-      const spacing = brushPlugin.stampSpacing ?? 4
+      const spacing = brushDabSpacing(brushPlugin)
       const dx = p.x - brushStampLast.x, dy = p.y - brushStampLast.y
-      const dist  = Math.hypot(dx, dy)
-      const steps = Math.max(1, Math.round(dist / spacing))
-      for (let i = 1; i <= steps; i++) {
-        stampBrush(brushPlugin, { x: brushStampLast.x + dx * i / steps, y: brushStampLast.y + dy * i / steps })
+      const dist = Math.hypot(dx, dy)
+      // Stamp at fixed distance intervals along the actual travelled path,
+      // tracked cumulatively across events — not once per event — for the
+      // same reason as Mix's identical fix: a slow/jittery drag fires far
+      // more mousemove events per px than a fast one, and stamping once per
+      // event regardless of distance would deposit far more paint (Flow
+      // compounds per dab) for a slow stroke than a fast one over the same
+      // path. See brushCumDist's declaration.
+      if (dist > 0) {
+        const settings = brushSettings()
+        const segStart = brushCumDist
+        brushCumDist += dist
+        let stamped = false
+        while (brushNextStampAt <= brushCumDist) {
+          const t = (brushNextStampAt - segStart) / dist
+          accumulateDab(brushPlugin, { x: brushStampLast.x + dx * t, y: brushStampLast.y + dy * t }, settings)
+          brushNextStampAt += spacing
+          stamped = true
+        }
+        // rAF-throttled: coalesces every pointermove within one frame into
+        // a single full-layer composite — see requestStrokeComposite.
+        if (stamped) requestStrokeComposite()
       }
       brushStampLast = { x: p.x, y: p.y }
     } else {
@@ -3229,8 +3540,10 @@ function _onPointerUpInner() {
 
   if (!drawing) return
   drawing = false
+  stopBrushHoldTimer()
   layerSnapshot = null
   strokeCanvas = null; maskCache = null; strokePoints = []; brushStampLast = null
+  brushCumDist = 0; brushNextStampAt = 0
   const ctx = getActiveCtx()
   if (ctx) {
     ctx.closePath()
@@ -3243,6 +3556,7 @@ function _onPointerUpInner() {
 
 function onPointerLeave() {
   cursorPos.value = null
+  brushCursorScreen.value = null
   selHoverHandle.value = null
   // Every in-progress drag (drawing included) now keeps tracking via the
   // window listener attached in onPointerDown, so leaving the canvas
@@ -3510,6 +3824,28 @@ onUnmounted(() => {
 .cur-ns        .draw-canvas { cursor: ns-resize; }
 .cur-ew        .draw-canvas { cursor: ew-resize; }
 .cur-text      .draw-canvas { cursor: text; }
+
+/* has-brush-cursor takes priority over the native browser cursor — the
+   .brush-cursor circle below stands in for it. Doesn't apply while a
+   selection-handle/move/etc cursor class is also active since those tools
+   never set brushCursorDiameter, so has-brush-cursor and e.g. cur-move are
+   mutually exclusive in practice. */
+.has-brush-cursor .draw-canvas { cursor: none; }
+
+/* Semi-transparent, centered on the pointer, sized to the current tool's
+   brush diameter (brushCursorStyle sets left/top/width/height inline). The
+   dark outer ring + light inner ring keeps it visible against both light
+   and dark canvas backgrounds. */
+.brush-cursor {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.15);
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  z-index: 25;
+}
 
 /* ── Text overlay ────────────────────────────────────────── */
 .text-placement {
