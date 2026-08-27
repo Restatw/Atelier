@@ -22,6 +22,27 @@ import { DurableObject } from 'cloudflare:workers'
 // Keep in sync with MAX_LAYERS in src/composables/useLayers.js.
 const MAX_LAYERS = 50
 
+// Caps how large one raw WS message may be. Generous enough for a
+// multi-layer, large-canvas push (uncompressed PNG dataURLs at up to the
+// app's 8192x8192 resize ceiling) but bounded so a client — malicious or
+// just buggy — can't send arbitrarily large frames to run up this DO's
+// memory/compute. There's no platform-enforced WS message size limit to
+// lean on here, so this is a self-imposed backstop.
+const MAX_MESSAGE_BYTES = 50 * 1024 * 1024
+
+// Caps how many concurrent sockets one room will accept. The Worker-level
+// SYNC_LIMITER rate-limits *new* connections per IP across all rooms; this
+// is the per-room backstop against a single room being flooded with
+// connections (from one IP or many).
+const MAX_PARTICIPANTS = 40
+
+// Per-socket message-rate limiting: even a single already-open, legitimate
+// connection could otherwise resend large payloads in a tight loop. Allow
+// bursts (fast strokes/undo legitimately fire several saves in a row) but
+// drop anything beyond this within the window rather than processing it.
+const MSG_RATE_WINDOW_MS = 5000
+const MSG_RATE_MAX = 40
+
 export class SyncRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env)
@@ -74,12 +95,17 @@ export class SyncRoom extends DurableObject {
     }
 
     const ip = request.headers.get('cf-connecting-ip') || 'unknown'
+    if (this.participants.size >= MAX_PARTICIPANTS) {
+      this.log(`reject full-room socket ip=${ip} participants=${this.participants.size}`)
+      return new Response('room full', { status: 503 })
+    }
+
     const pair = new WebSocketPair()
     const [client, server] = Object.values(pair)
     server.accept()
 
     const socketId = crypto.randomUUID()
-    this.participants.set(server, { socketId, identity: null, activeLayerId: null })
+    this.participants.set(server, { socketId, identity: null, activeLayerId: null, msgTimestamps: [] })
     this.log(`connect socket=${socketId} ip=${ip}`)
 
     server.addEventListener('message', (event) => {
@@ -101,10 +127,25 @@ export class SyncRoom extends DurableObject {
   }
 
   handleMessage(ws, raw, socketId, ip) {
-    let msg
-    try { msg = JSON.parse(raw) } catch { return }
     const p = this.participants.get(ws)
     if (!p) return
+
+    const size = typeof raw === 'string' ? raw.length : raw.byteLength
+    if (size > MAX_MESSAGE_BYTES) {
+      this.log(`reject oversize message socket=${socketId} ip=${ip} bytes=${size}`)
+      return
+    }
+
+    const now = Date.now()
+    p.msgTimestamps = p.msgTimestamps.filter(t => now - t < MSG_RATE_WINDOW_MS)
+    if (p.msgTimestamps.length >= MSG_RATE_MAX) {
+      this.log(`reject rate-limited message socket=${socketId} ip=${ip} count=${p.msgTimestamps.length}`)
+      return
+    }
+    p.msgTimestamps.push(now)
+
+    let msg
+    try { msg = JSON.parse(raw) } catch { return }
 
     if (msg.type === 'join') {
       p.identity = msg.identity || null
