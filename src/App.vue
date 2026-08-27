@@ -2860,17 +2860,22 @@ function getMixFalloffMask(r) {
 
 function sampleCanvasRegion(srcCanvas, cx, cy, r) {
   const buf = mkCanvas(r * 2, r * 2)
-  const bctx = buf.getContext('2d')
-  // cx/cy are fractional (interpolated dab positions), so this crop lands
-  // at a sub-pixel offset — with smoothing on, that bilinear-resamples the
-  // source, which for repeated round-trip sample→blend→re-sample cycles
-  // (Mix's whole pickup/drift loop) introduces a tiny but real per-dab
-  // colour bias even on a perfectly uniform source, compounding over many
-  // dabs into a visible darken/lighten drift on prolonged scrubbing over
-  // the same area. Sampling for Mix should be an exact copy, not a smooth
-  // resample, so disable it here.
-  bctx.imageSmoothingEnabled = false
-  bctx.drawImage(srcCanvas, cx - r, cy - r, r * 2, r * 2, 0, 0, r * 2, r * 2)
+  // cx/cy are fractional (interpolated dab positions). Rounding them to the
+  // nearest whole pixel before cropping means this drawImage is always a
+  // 1:1, pixel-aligned copy — no scaling/sub-pixel offset means the browser
+  // never has a reason to resample, so this is an exact copy regardless of
+  // imageSmoothingEnabled. That matters: sub-pixel cropping WITH smoothing
+  // bilinear-blends the source, which for Mix's repeated round-trip
+  // sample→blend→re-sample loop introduced a tiny but real per-dab colour
+  // bias — invisible on one dab, but compounding over many into a visible
+  // darken/lighten drift on prolonged scrubbing over the same area, even on
+  // a perfectly uniform source with nothing to actually blend toward.
+  // Disabling smoothing instead of rounding "fixes" the drift too, but
+  // trades it for visible terracing in the falloff mask's soft gradient
+  // when it's later drawn at a sub-pixel offset — pixel-snapping avoids
+  // both problems at once by never triggering resampling anywhere.
+  const sx = Math.round(cx - r), sy = Math.round(cy - r)
+  buf.getContext('2d').drawImage(srcCanvas, sx, sy, r * 2, r * 2, 0, 0, r * 2, r * 2)
   return buf
 }
 
@@ -2934,10 +2939,15 @@ function stampMixAt(ctx, q) {
 
   ctx.save()
   ctx.globalAlpha = strength
-  // q.x/q.y are fractional — see sampleCanvasRegion's comment on why
-  // smoothing needs to be off for Mix specifically.
-  ctx.imageSmoothingEnabled = false
-  ctx.drawImage(stamp, q.x - r, q.y - r)
+  // Same pixel-snapping reasoning as sampleCanvasRegion: q.x/q.y are
+  // fractional, and drawing `stamp` (a genuinely smooth radial falloff —
+  // getMixFalloffMask) at a sub-pixel offset forces a resample either way
+  // — bilinear blending compounds into the darkening-drift bug over many
+  // overlapping dabs, while disabling smoothing instead quantizes the
+  // falloff's own gradient into visible terraced/banded rings. Rounding to
+  // the nearest pixel makes this a 1:1 aligned draw, so neither problem
+  // has anything to resample.
+  ctx.drawImage(stamp, Math.round(q.x - r), Math.round(q.y - r))
   ctx.restore()
 
   // Drift the carried paint toward the colours it just passed over
