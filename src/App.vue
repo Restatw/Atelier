@@ -2892,9 +2892,13 @@ function handleMixDown(p) {
 
 const MIX_PICKUP_RATE = 0.35  // how fast the carried paint drifts toward newly-touched pixels, independent of opacity
 
-// handleMixMove spaces dabs at mixR/4, so a straight drag re-stamps any
-// given pixel near the stroke's centreline about 2r / (r/4) = 8 times.
-const MIX_DAB_OVERLAP = 8
+// handleMixMove spaces dabs at mixR/8, so a straight drag re-stamps any
+// given pixel near the stroke's centreline about 2r / (r/8) = 16 times.
+// (Was mixR/4 / 8 overlaps — too sparse: consecutive dabs' soft falloff
+// edges didn't overlap enough to blend into a smooth gradient, showing up
+// as a visible repeating ripple/wave pattern along a pushed trail. Same
+// class of fix as brushDabSpacing's tightening for the paint brushes.)
+const MIX_DAB_OVERLAP = 16
 
 function stampMixAt(ctx, q) {
   const r = mixR
@@ -2961,7 +2965,7 @@ function stampMixAt(ctx, q) {
 function handleMixMove(p) {
   const ctx = getActiveCtx()
   if (!ctx || !mixBuf) return
-  const spacing = Math.max(2, mixR / 4)
+  const spacing = Math.max(2, mixR / 8)
   const dx = p.x - mixLast.x, dy = p.y - mixLast.y
   const dist = Math.hypot(dx, dy)
   // Stamp at fixed distance intervals along the actual travelled path,
