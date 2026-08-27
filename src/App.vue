@@ -330,11 +330,11 @@
         <div class="bp-sliders">
           <div class="bp-row">
             <span class="bp-label">{{ t('brushSize') }}</span>
-            <input type="range" min="1" max="60" v-model.number="lineWidth" class="bp-slider" @mousedown.stop @touchstart.stop />
+            <input type="range" min="1" max="200" v-model.number="lineWidth" class="bp-slider" @mousedown.stop @touchstart.stop />
             <div class="bp-val-wrap">
-              <input type="number" class="bp-val-input" min="1" max="60"
+              <input type="number" class="bp-val-input" min="1" max="200"
                 :value="lineWidth"
-                @change="lineWidth = Math.max(1, Math.min(60, parseInt($event.target.value) || 1)); $event.target.value = lineWidth"
+                @change="lineWidth = Math.max(1, Math.min(200, parseInt($event.target.value) || 1)); $event.target.value = lineWidth"
                 @keydown.enter.stop="$event.target.blur()"
                 @focus.stop="$event.target.select()"
                 @mousedown.stop @touchstart.stop />
