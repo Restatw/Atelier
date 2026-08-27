@@ -944,7 +944,7 @@ import { useIpfsBackup } from './composables/useIpfsBackup.js'
 import { isWidget, isSyncActive, isCollabSession, generateCollabSessionId } from './widgetContext.js'
 import { formatIdentityName } from './collabIdentity.js'
 import { sendRoomMessage } from './widgetApi.js'
-import { initCollabSync, participants, myIdentity, syncConnected, recentEdits, RECENT_EDIT_WINDOW_MS } from './collabSync.js'
+import { initCollabSync, waitForJoin, participants, myIdentity, syncConnected, recentEdits, RECENT_EDIT_WINDOW_MS } from './collabSync.js'
 import { getPlugin, getPlugins } from './plugins/registry.js'
 import './plugins/builtin/index.js'
 
@@ -3287,6 +3287,12 @@ onMounted(async () => {
   await lc.init()
 
   initCollabSync({ onRemoteUpdate: queueOrApplyRemoteUpdate })
+  // Wait for the room's existing state (if any) to arrive before creating
+  // — and broadcasting — this participant's own layer at whatever size the
+  // canvas locally defaults to. Otherwise a joiner on a slow connection can
+  // push their own device's default size before the room's real size gets
+  // applied, clobbering it for everyone else already there.
+  await waitForJoin()
   lc.ensureOwnLayer()
   if (isSyncActive) nowTickTimer = setInterval(() => { nowTick.value = Date.now() }, 5000)
 

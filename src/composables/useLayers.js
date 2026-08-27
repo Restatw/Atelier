@@ -296,6 +296,17 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   // per-layer, rev-guarded merge on the receiving end.
   const _lastSynced = new Map() // id -> { name, visible, opacity, dataURL }
 
+  // Set right before resizeCanvasTo() applies a deliberate, user-initiated
+  // size change (drag handle or the size field — see App.vue's
+  // applyCanvasSize()/startCanvasResize()) and consumed by the very next
+  // pushChangesToSync() call. Marks that push's canvasW/canvasH as an
+  // intentional resize so the server (syncRoom.js) accepts it — as opposed
+  // to the canvasW/canvasH that ride along on every ordinary layer save,
+  // which the server now ignores once a room already has an established
+  // size, so a joiner's own device-default size can never silently resize
+  // the room for everyone else.
+  let _pendingResize = false
+
   function _layerDiffers(l, dataURL) {
     const prev = _lastSynced.get(l.id)
     if (!prev) return true
@@ -340,6 +351,8 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   // applyRemoteLayers, which calls persistLocalOnly() directly instead.
   function pushChangesToSync(dataURLs) {
     if (!isSyncActive || _applyingRemote) return
+    const isResize = _pendingResize
+    _pendingResize = false
     const currentIds = new Set(layers.value.map(l => l.id))
     const removedLayerIds = Array.from(_lastSynced.keys()).filter(id => !currentIds.has(id))
     const changed = layers.value
@@ -363,10 +376,11 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
         dataURL, rev: Date.now(),
       }))
 
-    if (changed.length || removedLayerIds.length) {
+    if (changed.length || removedLayerIds.length || isResize) {
       pushCanvasUpdate({
         canvasW: canvasLogicalW.value,
         canvasH: canvasLogicalH.value,
+        resize: isResize,
         layerOrder: layers.value.map(l => l.id),
         layers: changed,
         removedLayerIds,
@@ -806,6 +820,11 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   async function loadProject(project) {
     if (!project.layers || !project.canvasW || !project.canvasH) return null
 
+    // Importing a .atelier file is as deliberate a size change as dragging
+    // the resize handle — the file's own saved dimensions should win, even
+    // in an active collab room. See _pendingResize's declaration.
+    _pendingResize = true
+
     const w = project.canvasW, h = project.canvasH
     canvasLogicalW.value   = w
     canvasLogicalH.value   = h
@@ -852,6 +871,9 @@ export function useLayers({ paintStore, onCancelDraw, getFloatOverlay }) {
   }
 
   function resizeCanvasTo(w, h) {
+    // Marks the push that saveHistory()'s debounced persist will trigger
+    // below as a deliberate resize — see _pendingResize's declaration.
+    _pendingResize = true
     return new Promise(resolve => {
       const saved = layers.value.map(l => ({ id: l.id, url: l.canvas.toDataURL() }))
       canvasRef.value.width  = w; canvasRef.value.height = h

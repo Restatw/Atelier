@@ -116,8 +116,18 @@ export class SyncRoom extends DurableObject {
 
     if (msg.type === 'canvas-update') {
       if (!msg.layers) return
-      this.canvasW = msg.canvasW ?? this.canvasW
-      this.canvasH = msg.canvasH ?? this.canvasH
+      // Canvas size is locked once the room has one: only the room's very
+      // first save (nothing established yet) or a message explicitly
+      // flagged msg.resize (a deliberate user-initiated resize — see
+      // resizeCanvasTo() in src/composables/useLayers.js) may change it.
+      // Every other canvas-update — most commonly a joiner's
+      // ensureOwnLayer() save, which otherwise carries THEIR device's own
+      // default canvas size — must never be able to resize the room out
+      // from under everyone else already in it.
+      if (this.canvasW == null || this.canvasH == null || msg.resize) {
+        this.canvasW = msg.canvasW ?? this.canvasW
+        this.canvasH = msg.canvasH ?? this.canvasH
+      }
 
       const applied = []
       const rejectedStale = []
